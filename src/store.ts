@@ -123,6 +123,7 @@ type Persisted = {
   handoffMode: HandoffMode
   modelVariant: Variant // modèles conseillés : versions standard ou non censurées
   webSearch: boolean // recherche Internet / météo pour les modèles (désactivée par défaut)
+  labMode: boolean // labos isolés Linux / Windows / Android où l'IA teste des programmes (option « Labo »)
   userCity: string // ville par défaut pour la météo ('' = demander)
   autoTools: boolean // active tout seul Agent / Web selon la demande (« ouvre… », « cherche… »)
   voice: VoicePrefs // conversation vocale : voix, reconnaissance, débit, langue
@@ -176,6 +177,7 @@ export type State = Persisted & {
   setHandoffMode: (mode: HandoffMode) => void
   setModelVariant: (v: Variant) => void
   setWebSearch: (on: boolean) => void
+  setLabMode: (on: boolean) => void
   setUserCity: (city: string) => void
   setAutoTools: (on: boolean) => void
   setVoicePrefs: (patch: Partial<VoicePrefs>) => void
@@ -241,6 +243,7 @@ export const useStore = create<State>()(
       handoffMode: 'full',
       modelVariant: 'standard',
       webSearch: false,
+      labMode: false,
       userCity: '',
       autoTools: true,
       voice: DEFAULT_VOICE_PREFS,
@@ -397,6 +400,7 @@ export const useStore = create<State>()(
       setHandoffMode: (handoffMode) => set({ handoffMode }),
       setModelVariant: (modelVariant) => set({ modelVariant }),
       setWebSearch: (webSearch) => set({ webSearch }),
+      setLabMode: (labMode) => set({ labMode }),
       setUserCity: (userCity) => set({ userCity: userCity.trim() }),
       setAutoTools: (autoTools) => set({ autoTools }),
       setVoicePrefs: (patch) => set((s) => ({ voice: { ...s.voice, ...patch } })),
@@ -436,6 +440,7 @@ export const useStore = create<State>()(
         handoffMode: s.handoffMode,
         modelVariant: s.modelVariant,
         webSearch: s.webSearch,
+        labMode: s.labMode,
         userCity: s.userCity,
         autoTools: s.autoTools,
         voice: s.voice,

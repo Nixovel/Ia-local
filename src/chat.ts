@@ -3,7 +3,7 @@ import { thinkModeOf, toast, useStore, type Attachment, type Conversation, type 
 import { ollama, type ApiMessage, type ApiToolCall, type ModelInfo } from './lib/ollama'
 import { isChatModel, prettyName, supportsThinking, supportsTools, supportsVision } from './lib/models'
 import {
-  agentInfo, agentSystemPrompt, callTool, CLIENT_TOOLS, needsApproval, parseTextToolCalls, TOOL_NAMES, TOOLS, WEB_TOOL_NAMES, WEB_TOOLS, webSystemPrompt,
+  agentInfo, agentSystemPrompt, callTool, CLIENT_TOOLS, LAB_TOOL_NAMES, LAB_TOOLS, labSystemPrompt, needsApproval, parseTextToolCalls, TOOL_NAMES, TOOLS, WEB_TOOL_NAMES, WEB_TOOLS, webSystemPrompt,
   type ToolResult,
 } from './lib/agent'
 import { weather, webFetch, webSearch } from './lib/web'
@@ -14,7 +14,7 @@ import { formatTime, uid } from './lib/format'
 import { captureScreen, isTextFile, normalizeImage, readAsDataUrl } from './lib/files'
 import { detectTask } from './lib/strengths'
 import { voiceActive } from './voice/state'
-import { wantsAction, wantsWeb } from './lib/intent'
+import { wantsAction, wantsLab, wantsWeb } from './lib/intent'
 
 const controllers = new Map<string, AbortController>()
 const runs = new Map<string, Promise<void>>()
@@ -186,20 +186,27 @@ function buildMessages(msgs: Message[], system: string, vision: boolean, summary
   return out
 }
 
-/** « Ouvre… » → mode Agent ; « cherche… », « météo… » → Web : activés tout seuls (option, activée par défaut). */
+/**
+ * « Ouvre… » → mode Agent ; « cherche… », « météo… » → Web ; « teste ce programme », « compile », « sous Windows… » → Labo :
+ * activés tout seuls (option, activée par défaut). Tester du code passe par le labo, pas par l'ordinateur.
+ */
 function autoEnableTools(text: string, model: string) {
   const s = useStore.getState()
   if (!s.autoTools || !text) return
-  const action = wantsAction(text) && !s.agentMode
+  const labWanted = wantsLab(text)
+  const action = wantsAction(text) && !labWanted && !s.agentMode
   const web = wantsWeb(text) && !s.webSearch
-  if (!action && !web) return
+  const lab = labWanted && !s.labMode
+  if (!action && !web && !lab) return
   if (!supportsTools(s.runtime.models.find((m) => m.name === model))) {
-    toast(`${prettyName(model)} ne sait pas utiliser d'outils : choisissez un modèle avec la capacité « Outils » pour ${action ? 'agir sur l’ordinateur' : 'chercher sur Internet'}.`, 'danger')
+    toast(`${prettyName(model)} ne sait pas utiliser d'outils : choisissez un modèle avec la capacité « Outils » pour ${action ? 'agir sur l’ordinateur' : lab ? 'tester dans le labo' : 'chercher sur Internet'}.`, 'danger')
     return
   }
   if (action) s.setAgentMode(true)
   if (web) s.setWebSearch(true)
-  toast(`${[action && 'Mode Agent', web && 'Recherche web'].filter(Boolean).join(' et ')} activé${action && web ? 's' : ''} pour cette demande.`, 'success')
+  if (lab) s.setLabMode(true)
+  const on = [action && 'Mode Agent', web && 'Recherche web', lab && 'Labo'].filter(Boolean) as string[]
+  toast(`${on.length > 1 ? `${on.slice(0, -1).join(', ')} et ${on[on.length - 1]}` : on[0]} activé${on.length > 1 ? 's' : ''} pour cette demande.`, 'success')
 }
 
 /** Envoie le brouillon, ou `text` (conversation vocale : le brouillon tapé n'est alors pas touché). */
@@ -363,10 +370,12 @@ async function executeTools(convId: string, msgId: string, signal: AbortSignal) 
       patch(call.id, { status: 'error', output: `Outil inconnu : ${call.name}` })
       continue
     }
-    // Un outil n'est utilisable que si son option est activée (mode Agent, ou Recherche Internet pour les outils web)
+    // Un outil n'est utilisable que si son option est activée (mode Agent, Recherche Internet, ou Labo)
     const st = useStore.getState()
-    if (WEB_TOOL_NAMES.has(call.name) ? !st.webSearch : !st.agentMode) {
-      patch(call.id, { status: 'error', output: `Outil non activé : ${call.name}. ${WEB_TOOL_NAMES.has(call.name) ? 'La recherche Internet est désactivée.' : 'Le mode Agent est désactivé.'}` })
+    const kind = WEB_TOOL_NAMES.has(call.name) ? 'web' : LAB_TOOL_NAMES.has(call.name) ? 'lab' : 'agent'
+    if (kind === 'web' ? !st.webSearch : kind === 'lab' ? !st.labMode : !st.agentMode) {
+      const why = kind === 'web' ? 'La recherche Internet est désactivée.' : kind === 'lab' ? 'Le labo est désactivé.' : 'Le mode Agent est désactivé.'
+      patch(call.id, { status: 'error', output: `Outil non activé : ${call.name}. ${why}` })
       continue
     }
     const allowed = useStore.getState().conversations[convId]?.allowedTools ?? []
@@ -440,11 +449,15 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
   }
 
   if (web) system = [system.trim(), webSystemPrompt(s.userCity)].filter(Boolean).join('\n\n')
+  // Labos isolés (Linux, Windows, Android) : l'IA y compile et teste pour de vrai
+  const lab = s.labMode && supportsTools(info)
+  const bridgeInfo = agent || lab ? await agentInfo().catch(() => null) : null
+  if (lab) system = [system.trim(), labSystemPrompt(bridgeInfo?.arch)].filter(Boolean).join('\n\n')
   if (voiceActive()) system = [system.trim(), VOICE_PROMPT].filter(Boolean).join('\n\n')
   // AppleScript n'existe que sur macOS : inutile de le proposer au modèle ailleurs
-  const platform = agent ? (await agentInfo().catch(() => null))?.platform : undefined
+  const platform = agent ? bridgeInfo?.platform : undefined
   const agentTools = TOOLS.filter((t) => t.function.name !== 'applescript' || platform === 'darwin')
-  const tools = [...(agent ? agentTools : []), ...(web ? WEB_TOOLS : [])]
+  const tools = [...(agent ? agentTools : []), ...(lab ? LAB_TOOLS : []), ...(web ? WEB_TOOLS : [])]
 
   // Demande d'image : Ollama ne génère pas de photo, le modèle dessine en SVG (affiché comme une image dans le fil)
   if (lastUser && detectTask(lastUser.content, !!lastUser.attachments?.some((a) => a.kind === 'image')) === 'image')

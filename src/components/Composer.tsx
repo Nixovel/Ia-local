@@ -1,11 +1,11 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, AudioLines, Bot, Brain, ChevronDown, FileCode, Folder, Globe, Lightbulb, Paperclip, ScanLine, Square, TriangleExclamationPoint, X } from 'lucide-react'
+import { ArrowUp, AudioLines, Bot, Brain, ChevronDown, FileCode, FlaskConical, Folder, Globe, Lightbulb, Paperclip, ScanLine, Square, TriangleExclamationPoint, X } from 'lucide-react'
 import { agentInfo } from '../lib/agent'
 import { detectTask, strengthInfo, suggestModel } from '../lib/strengths'
 import { thinkModeOf, useStore, type ThinkMode } from '../store'
 import { addFiles, addScreenCapture, send, shouldThink, stop } from '../chat'
-import { wantsAction, wantsWeb } from '../lib/intent'
+import { wantsAction, wantsLab, wantsWeb } from '../lib/intent'
 import { startConversation } from '../voice/conversation'
 import { prettyName, supportsThinking, supportsTools, supportsVision } from '../lib/models'
 import { formatBytes } from '../lib/format'
@@ -37,6 +37,7 @@ export function Composer({ placeholder, autoFocus }: { placeholder: string; auto
   const composerTick = useStore((s) => s.composerTick)
   const agentMode = useStore((s) => s.agentMode)
   const webSearch = useStore((s) => s.webSearch)
+  const labMode = useStore((s) => s.labMode)
   const workDir = useStore((s) => (s.activeId ? s.conversations[s.activeId]?.cwd : undefined) || s.agentCwd)
   const { setDraft, removeDraftAttachment, updateSettings, setAgentMode, setSettingsOpen } = useStore.getState()
   const [home, setHome] = useState('')
@@ -73,7 +74,8 @@ export function Composer({ placeholder, autoFocus }: { placeholder: string; auto
   const tools = supportsTools(info)
   const intent = useMemo(
     () => ({
-      action: wantsAction(draft.text),
+      lab: wantsLab(draft.text),
+      action: wantsAction(draft.text) && !wantsLab(draft.text),
       web: wantsWeb(draft.text),
       think: !!draft.text.trim() && shouldThink({ id: '', role: 'user', content: draft.text, attachments: draft.attachments, createdAt: 0 }),
     }),
@@ -81,6 +83,7 @@ export function Composer({ placeholder, autoFocus }: { placeholder: string; auto
   )
   const autoAgent = autoTools && tools && !agentMode && intent.action
   const autoWeb = autoTools && tools && !webSearch && intent.web
+  const autoLab = autoTools && tools && !labMode && intent.lab
   const autoThink = think === 'auto' && intent.think
   // Option « activer tout seul » coupée : on propose seulement d'activer l'Agent
   const [agentHintOff, setAgentHintOff] = useState(false)
@@ -235,6 +238,25 @@ export function Composer({ placeholder, autoFocus }: { placeholder: string; auto
         >
           <Globe size={14} strokeWidth={1.6} />
           Web
+        </button>
+        <button
+          type="button"
+          className={`toggle-chip lab-chip${labMode && supportsTools(info) ? ' is-lab' : autoLab ? ' will-on' : ''}`}
+          disabled={!supportsTools(info)}
+          onClick={() => useStore.getState().setLabMode(!labMode)}
+          aria-pressed={labMode}
+          title={
+            !supportsTools(info)
+              ? 'Ce modèle ne sait pas utiliser d’outils : pas de labo'
+              : autoLab
+                ? 'Votre demande demande de tester du code : le labo s’activera tout seul à l’envoi.'
+              : labMode
+                ? 'Labo activé : le modèle compile et teste ses programmes dans des machines isolées (Linux, Windows, Android). Cliquer pour désactiver.'
+                : 'Activer le labo : Linux, Windows et Android isolés où le modèle teste ses programmes, sans toucher à votre ordinateur'
+          }
+        >
+          <FlaskConical size={14} strokeWidth={1.6} />
+          Labo
         </button>
         {agentMode && supportsTools(info) && cwdLabel && (
           <button type="button" className="cwd-chip" onClick={() => setSettingsOpen(true)} title={`Dossier de travail : ${cwdShown}`}>

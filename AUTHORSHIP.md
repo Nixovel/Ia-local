@@ -22,6 +22,7 @@ ce qui compte, c'est de pouvoir montrer qui l'a publié en premier et sous quel 
 | Date | Version | Fichiers | Empreinte globale (SHA-256) |
 | --- | --- | --- | --- |
 | 2026-11-23 | 1.0 — première publication | 63 | `543c1cc2599a2a2dfb5f13065e458870fcbe862706d635979f43f86f376e88cd` |
+| 2026-11-23 | 1.1 — labos Linux, Windows et Android | 71 | `cf670f7a9cdf87e0d59d5070c70550bd0fa7cf28af213e172c5841cec9211659` |
 
 Vérifier : `npm run fingerprint -- --check`. Un fichier copié tel quel a la même empreinte que l'original ; la liste
 permet de repérer en quelques secondes les fichiers repris dans un autre projet.

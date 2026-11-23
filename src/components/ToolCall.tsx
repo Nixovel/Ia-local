@@ -1,7 +1,7 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { useState } from 'react'
 import {
-  AppWindow, Camera, Check, ChevronDown, CloudSun, Code, Cpu, Download, Eye, FilePen, FileText, FolderInput, FolderOpen, Globe, LoaderCircle, Search, ShieldCheck, Terminal, X,
+  AppWindow, Camera, Check, ChevronDown, CloudSun, Code, Cpu, Download, Eye, FilePen, FileText, FlaskConical, FolderInput, FolderOpen, Globe, LoaderCircle, Search, ShieldCheck, Smartphone, Terminal, X,
   type LucideIcon,
 } from 'lucide-react'
 import { useStore, type ToolCall } from '../store'
@@ -22,6 +22,17 @@ const META: Record<string, { label: string; icon: LucideIcon; detail: (a: Record
   open: { label: 'Ouvrir', icon: AppWindow, detail: (a) => String(a.target ?? '') },
   screenshot: { label: "Capture d'écran", icon: Camera, detail: () => 'écran principal' },
   applescript: { label: 'AppleScript', icon: Code, detail: (a) => String(a.script ?? '').split('\n')[0] },
+  lab_run: { label: 'Labo', icon: FlaskConical, detail: (a) => `${labName(a)} · ${String(a.command ?? '')}` },
+  lab_write_file: { label: 'Labo · écrire', icon: FilePen, detail: (a) => `${labName(a)} · ${String(a.path ?? '')}` },
+  lab_read_file: { label: 'Labo · lire', icon: FileText, detail: (a) => `${labName(a)} · ${String(a.path ?? '')}` },
+  lab_screenshot: { label: 'Labo · écran', icon: Camera, detail: (a) => (a.lab === 'android' ? 'téléphone virtuel' : `écran virtuel ${labName(a)}`) },
+  lab_copy_in: { label: 'Copier dans le labo', icon: FolderInput, detail: (a) => `${String(a.source ?? '')} → ${labName(a)}` },
+  android_adb: { label: 'Téléphone virtuel', icon: Smartphone, detail: (a) => `adb ${String(a.args ?? a.command ?? '')}` },
+}
+
+const LAB_NAMES: Record<string, string> = { linux: 'Linux', windows: 'Windows', android: 'Android' }
+function labName(a: Record<string, unknown>) {
+  return LAB_NAMES[String(a.lab ?? 'linux')] ?? String(a.lab)
 }
 
 const STATUS: Record<ToolCall['status'], string> = {
@@ -36,15 +47,15 @@ export function ToolCallView({ call, msgId }: { call: ToolCall; msgId: string })
   const openPanel = useStore((s) => s.openPanel)
   const meta = META[call.name] ?? { label: call.name, icon: Code, detail: () => '' }
   const path = String(call.args.path ?? '')
-  const viewable = call.name === 'write_file' && call.status === 'done'
+  const viewable = (call.name === 'write_file' || call.name === 'lab_write_file') && call.status === 'done'
   const waiting = call.status === 'pending' && call.needsApproval
   const [open, setOpen] = useState(false)
   const preview =
-    call.name === 'write_file'
+    call.name === 'write_file' || call.name === 'lab_write_file'
       ? String(call.args.content ?? '')
       : call.name === 'applescript'
         ? String(call.args.script ?? '')
-        : call.name === 'run_command'
+        : call.name === 'run_command' || call.name === 'lab_run'
           ? String(call.args.command ?? '')
           : ''
   const previewLines = preview.split('\n')
@@ -83,7 +94,11 @@ export function ToolCallView({ call, msgId }: { call: ToolCall; msgId: string })
           )}
           <div className="tool-actions">
             <ShieldCheck size={14} className="muted" />
-            <span className="caption secondary">Le modèle veut effectuer cette action sur votre ordinateur.</span>
+            <span className="caption secondary">
+              {call.name === 'lab_copy_in'
+                ? 'Le modèle veut copier ces fichiers de votre ordinateur dans le labo isolé.'
+                : 'Le modèle veut effectuer cette action sur votre ordinateur.'}
+            </span>
             <span className="spacer" />
             <Button small variant="ghost" onClick={() => decideTool(call.id, 'deny')}>
               Refuser

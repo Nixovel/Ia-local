@@ -3,6 +3,7 @@
 // Vérifie que Lumen est prêt sur cette machine (macOS, Windows, Linux) et que l'IA répond vraiment.
 //   npm run doctor        (ou « lumen doctor »)      --quiet : résumé court
 // Ne modifie rien. Code de sortie 1 si un élément indispensable manque.
+import { execFileSync } from 'node:child_process'
 import { existsSync, statfsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -107,7 +108,29 @@ if (models.length) {
   }
 }
 
-// 7. Lumen déjà lancé ? (4173 : version installée ; 5173 : développement)
+// 7. Labos isolés (facultatif) : Docker pour Linux / Windows / Android, émulateur Android pour le téléphone virtuel
+if (!quiet) {
+  const dim = (label, detail) => console.log(`  ${c(2, '·')} ${label}${detail ? c(2, ` — ${detail}`) : ''}`)
+  let docker = null
+  try {
+    docker = execFileSync('docker', ['info', '--format', '{{.ServerVersion}}|{{.OperatingSystem}}'], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch (e) {
+    docker = e.code === 'ENOENT' ? null : ''
+  }
+  if (docker) ok(`Labos : Docker ${docker.split('|')[0]} prêt`, docker.split('|')[1])
+  else if (docker === '') dim('Labos : Docker est installé mais arrêté', 'démarrez-le pour les labos Linux, Windows et Android')
+  else dim('Labos (facultatif) : Docker absent', 'https://docs.docker.com/get-started/get-docker/')
+  const home = os.homedir()
+  const sdkDefault =
+    process.platform === 'darwin' ? path.join(home, 'Library', 'Android', 'sdk')
+      : process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local'), 'Android', 'Sdk')
+        : path.join(home, 'Android', 'Sdk')
+  const sdk = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT, sdkDefault].find((p) => p && existsSync(path.join(p, 'emulator')))
+  if (sdk) ok('Labo Android : émulateur présent (téléphone virtuel)', sdk)
+  else dim('Labo Android : pas d’émulateur', 'installez Android Studio pour tester les applis sur un téléphone virtuel')
+}
+
+// 8. Lumen déjà lancé ? (4173 : version installée ; 5173 : développement)
 let running = null
 for (const url of ['http://127.0.0.1:4173', 'http://127.0.0.1:5173']) {
   try {

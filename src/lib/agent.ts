@@ -5,10 +5,12 @@ import type { OllamaTool } from './ollama'
 export type ToolName =
   | 'set_working_dir' | 'run_command' | 'read_file' | 'write_file' | 'list_dir' | 'open' | 'screenshot' | 'applescript'
   | 'system_info' | 'install_model' | 'web_search' | 'web_fetch' | 'weather'
+  | 'lab_run' | 'lab_write_file' | 'lab_read_file' | 'lab_screenshot' | 'lab_copy_in' | 'android_adb'
 export type ToolResult = { ok: boolean; output: string; image?: string; cwd?: string }
-export type AgentInfo = { token: string; home: string; platform: string; shell: string }
+export type AgentInfo = { token: string; home: string; platform: string; arch?: string; shell: string }
 
-const fn = (name: ToolName, description: string, properties: Record<string, { type: string; description: string }>, required: string[]): OllamaTool => ({
+type Param = { type: string; description: string; enum?: string[] }
+const fn = (name: ToolName, description: string, properties: Record<string, Param>, required: string[]): OllamaTool => ({
   type: 'function',
   function: { name, description, parameters: { type: 'object', properties, required } },
 })
@@ -60,11 +62,44 @@ export const WEB_TOOLS: OllamaTool[] = [
 ]
 export const WEB_TOOL_NAMES = new Set<string>(WEB_TOOLS.map((t) => t.function.name))
 
-export const TOOL_NAMES = new Set<string>([...TOOLS, ...WEB_TOOLS].map((t) => t.function.name))
+/** Labos isolés (option « Labo ») : Linux, Windows (Wine) et Android, sans risque pour l'ordinateur. */
+const LAB: Param = { type: 'string', description: 'Le labo : « linux », « windows » ou « android »', enum: ['linux', 'windows', 'android'] }
+export const LAB_TOOLS: OllamaTool[] = [
+  fn('lab_run', "Exécute une commande bash dans un labo isolé (Linux, Windows ou Android) pour installer, compiler, lancer et tester des programmes sans risque pour l'ordinateur. Renvoie la sortie et le code de sortie.", {
+    lab: LAB,
+    command: { type: 'string', description: 'La commande bash, ex. « python3 app.py », « gcc main.c -o main && ./main », « wine prog.exe », « ./gradlew assembleDebug »' },
+    cwd: { type: 'string', description: 'Dossier dans le labo (optionnel, /workspace par défaut)' },
+    timeout: { type: 'number', description: 'Durée maximale en secondes (optionnel, 300 par défaut, 900 pour android)' },
+  }, ['lab', 'command']),
+  fn('lab_write_file', "Crée ou remplace un fichier dans un labo (chemin relatif = /workspace ; les dossiers manquants sont créés). Écris le fichier complet.", {
+    lab: LAB,
+    path: { type: 'string', description: 'Chemin du fichier, ex. « projet/main.py » (labo windows : aussi « C:\\labo\\prog.c »)' },
+    content: { type: 'string', description: 'Contenu complet du fichier' },
+  }, ['lab', 'path', 'content']),
+  fn('lab_read_file', "Lit un fichier texte d'un labo (ou liste le contenu d'un dossier).", {
+    lab: LAB,
+    path: { type: 'string', description: 'Chemin du fichier ou du dossier (relatif = /workspace)' },
+  }, ['lab', 'path']),
+  fn('lab_screenshot', "Capture l'écran d'un labo pour voir un programme graphique : écran virtuel Linux ou Windows, ou écran du téléphone virtuel Android.", {
+    lab: LAB,
+  }, ['lab']),
+  fn('lab_copy_in', "Copie un fichier ou un dossier de l'ordinateur de l'utilisateur dans un labo, pour le tester.", {
+    lab: LAB,
+    source: { type: 'string', description: "Chemin sur l'ordinateur, ex. « ~/Documents/mon-projet »" },
+    dest: { type: 'string', description: 'Destination dans le labo (optionnel, /workspace/<nom> par défaut)' },
+  }, ['lab', 'source']),
+  fn('android_adb', "Pilote le téléphone virtuel Android du labo (démarré automatiquement) avec une commande adb : install, uninstall, shell, logcat, push, pull. Chemins de fichiers relatifs = /workspace du labo android.", {
+    args: { type: 'string', description: "Arguments d'adb, ex. « install -r MonApp/app/build/outputs/apk/debug/app-debug.apk », « shell monkey -p com.exemple.monapp 1 », « shell input tap 540 1200 », « logcat -d -t 200 »" },
+  }, ['args']),
+]
+export const LAB_TOOL_NAMES = new Set<string>(LAB_TOOLS.map((t) => t.function.name))
+
+export const TOOL_NAMES = new Set<string>([...TOOLS, ...WEB_TOOLS, ...LAB_TOOLS].map((t) => t.function.name))
 
 /** Outils exécutés dans l'interface (pas par le pont local). */
 export const CLIENT_TOOLS = new Set(['system_info', 'install_model', ...WEB_TOOL_NAMES])
-const NO_APPROVAL = new Set(['system_info', ...WEB_TOOL_NAMES])
+// Le labo est isolé de l'ordinateur : on n'y demande pas de validation, sauf pour y copier des fichiers de l'ordinateur.
+const NO_APPROVAL = new Set(['system_info', ...WEB_TOOL_NAMES, ...[...LAB_TOOL_NAMES].filter((n) => n !== 'lab_copy_in')])
 
 const READ_ONLY = new Set(['list_dir', 'read_file'])
 
@@ -166,6 +201,22 @@ export function webSystemPrompt(city: string): string {
     "- Actualité, faits récents, prix, horaires, ou toute information dont tu n'es pas sûr : appelle web_search, puis web_fetch pour lire une page si les extraits ne suffisent pas.",
     '- Réponds à partir des résultats, sans rien inventer, et cite tes sources en liens Markdown [titre](url).',
     "- Pour une question générale que tu connais bien, réponds directement, sans outil.",
+  ].join('\n')
+}
+
+/** Consignes quand les labos sont activés : ce que contient chaque labo et comment tester pour de vrai. */
+export function labSystemPrompt(arch?: string): string {
+  const cpu = arch === 'arm64' ? 'ARM 64 bits' : 'x86-64'
+  return [
+    "Tu disposes de labos isolés pour écrire, compiler, exécuter et tester des programmes sans risque pour l'ordinateur de l'utilisateur (outils lab_* et android_adb). Dès qu'il faut exécuter ou tester du code, fais-le dans un labo au lieu de seulement l'écrire.",
+    `- « linux » : Ubuntu 26.04 LTS (${cpu}), tu es root. Python 3, pip, Node.js LTS, npm, gcc/g++, make, cmake, gdb, git, curl, sqlite3. Installe le reste toi-même : « apt-get update && apt-get install -y … » (ex. dotnet-sdk-10.0, golang, rustc, openjdk-25-jdk), « pip install … », « npm install -g … ».`,
+    `- « windows » : Windows simulé par Wine (64 bits). Lance un programme : « wine prog.exe » ; invite de commandes : « cmd dir », « cmd script.bat » ; PowerShell : « pwsh -c '…' » ; compile en .exe : « x86_64-w64-mingw32-gcc prog.c -o prog.exe » (C++ : x86_64-w64-mingw32-g++ -static). C:\\labo = /workspace. C# : « csc Prog.cs » puis « wine Prog.exe » (Wine Mono). Ce n'est pas un vrai Windows : pilotes, anti-triche ou programmes très récents peuvent ne pas marcher.${arch === 'arm64' ? " Sur ce Mac à processeur Apple, seuls les programmes Windows 64 bits fonctionnent (compile toujours en 64 bits) et seule la bibliothèque de base de .NET se charge : pour du C# / .NET complet, utilise le labo linux (« apt-get install -y dotnet-sdk-10.0 », puis « dotnet new console -o App && cd App && dotnet run »)." : ''}`,
+    "- « android » : construit des applis Android (JDK 25, Gradle, SDK Android). Nouveau projet : « android create empty-activity --name \"Mon App\" --application-id com.exemple.monapp -o MonApp », puis « cd MonApp && ./gradlew assembleDebug » (APK : MonApp/app/build/outputs/apk/debug/app-debug.apk). Teste sur le téléphone virtuel avec android_adb : « install -r MonApp/app/build/outputs/apk/debug/app-debug.apk », « shell monkey -p com.exemple.monapp 1 » (lance l'appli), « shell input tap X Y », « shell input text Bonjour », « shell uiautomator dump /sdcard/ui.xml » puis « shell cat /sdcard/ui.xml » (boutons et coordonnées), « logcat -d -t 200 » (erreurs). Regarde l'écran avec lab_screenshot (lab « android »).",
+    "- Fichiers : lab_write_file / lab_read_file (chemins relatifs = /workspace). /workspace est le dossier « ~/Lumen Labo/<labo> » de l'utilisateur : il y retrouve tes fichiers. Pour tester un projet de l'ordinateur, copie-le d'abord avec lab_copy_in.",
+    "- Programmes graphiques (Linux, Windows) : lance-les en arrière-plan (« nohup python3 app.py > /tmp/app.log 2>&1 & » ou « nohup wine prog.exe > /tmp/prog.log 2>&1 & »), attends (« sleep 3 »), puis lab_screenshot ; clique et tape avec xdotool (« xdotool mousemove 400 300 click 1 », « xdotool type 'texte' »).",
+    "- Serveurs : lance-les en arrière-plan avec nohup, sur 0.0.0.0 et un port de 8000 à 8004 ; l'utilisateur les ouvre à http://127.0.0.1:18000 à 18004 (labo windows : 19000 à 19004, android : 20000 à 20004).",
+    "- Une commande qui attend une saisie au clavier bloque : donne l'entrée (« echo 5 | ./prog ») ou des arguments.",
+    "- Le premier usage d'un labo peut prendre quelques minutes (préparation). Teste vraiment : exécute, lis les erreurs, corrige et relance jusqu'à ce que ça marche, puis résume ce que tu as testé et le résultat.",
   ].join('\n')
 }
 

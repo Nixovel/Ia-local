@@ -151,7 +151,7 @@ export function conversationFiles(messages: Message[]): CodeFile[] {
     }
     // Fichiers réellement écrits sur le disque par l'agent
     for (const t of m.toolCalls ?? []) {
-      if (t.name !== 'write_file' || t.status !== 'done' || typeof t.args.path !== 'string') continue
+      if ((t.name !== 'write_file' && t.name !== 'lab_write_file') || t.status !== 'done' || typeof t.args.path !== 'string') continue
       const path = t.args.path
       files.push({
         key: `${m.id}:tool:${t.id}`, msgId: m.id, index: -1, filename: path, lang: langFromFilename(path),

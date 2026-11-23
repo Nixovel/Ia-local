@@ -19,6 +19,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { LAB_TOOL_NAMES, labAction, labStatus, labTool } from './lab'
 
 const TOKEN = randomBytes(24).toString('hex')
 const MAX_OUT = 20_000
@@ -287,6 +288,8 @@ async function runTool(name: string, a: Record<string, unknown>, cwd: string): P
     case 'fetch_url':
       return fetchUrl(str('url'))
     default:
+      // Labos isolés (Linux, Windows, Android) : voir agent/lab.ts
+      if (LAB_TOOL_NAMES.has(name)) return labTool(name, a, cwd)
       return { ok: false, output: `Outil inconnu : ${name}` }
   }
 }
@@ -582,7 +585,27 @@ const handler: Connect.NextHandleFunction = async (req, res, next) => {
   if (req.method === 'OPTIONS' || !allowed(req)) return send(res, 403, { ok: false, output: 'Accès refusé' })
   try {
     if (req.url === '/agent/token' && req.method === 'GET') {
-      return send(res, 200, { token: TOKEN, home: os.homedir(), platform: process.platform, shell: shellFor('')[0] })
+      return send(res, 200, { token: TOKEN, home: os.homedir(), platform: process.platform, arch: process.arch, shell: shellFor('')[0] })
+    }
+    if (req.url === '/agent/lab') {
+      if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })
+      if (req.method === 'GET') return send(res, 200, await labStatus())
+      const { action, lab, value } = (await readBody(req)) as { action?: string; lab?: string; value?: unknown }
+      // Progression en NDJSON (construction d'un labo, démarrage du téléphone virtuel…)
+      res.statusCode = 200
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+      res.setHeader('Cache-Control', 'no-store')
+      const emit = (o: Record<string, unknown>) => {
+        if (!res.writableEnded) res.write(JSON.stringify(o) + '\n')
+      }
+      try {
+        await labAction(String(action ?? ''), lab, value, emit)
+        emit({ done: true })
+      } catch (e) {
+        const m = (e as Error).message
+        emit(m === 'android-license' ? { error: 'Licence du SDK Android à accepter (Réglages → Labos).', needsLicense: true } : { error: m })
+      }
+      return res.end()
     }
     if (req.url === '/agent/system' && req.method === 'GET') {
       if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })

@@ -115,6 +115,27 @@ Version installée (plus légère) : `npm run build && npm start` (http://127.0.
   - `web_fetch` : lecture d'une page (via Ollama, sinon par le pont local, qui refuse les adresses locales et privées).
   Il reçoit la date et l'heure, et cite ses sources. Les modèles restent locaux ; seules les recherches partent en ligne
   (l'interface l'indique : « Recherche web » au lieu de « Mode hors ligne »).
+- **Labos isolés Linux, Windows et Android** (bouton « Labo » dans la zone de saisie, ou Réglages → « Labos ») : le
+  modèle écrit, compile, lance et teste ses programmes dans des machines à part (conteneurs Docker), sans toucher à
+  l'ordinateur ; seul le dossier `~/Lumen Labo/<labo>` est partagé. Outils `lab_run`, `lab_write_file`,
+  `lab_read_file`, `lab_screenshot`, `lab_copy_in` (copie d'un projet de l'ordinateur, avec votre accord) et `android_adb`.
+  - **Linux** : Ubuntu 26.04 LTS, Python, Node.js LTS (dernière, choisie à la construction), GCC, CMake, Git… ; le
+    modèle est root (`apt-get`, `pip`, `npm`).
+  - **Windows** : Wine 11 (WineHQ, dernière version), MinGW-w64 (C/C++ → `.exe`), C# avec Wine Mono (`csc`),
+    PowerShell 7 ; `C:\labo` = dossier partagé. Ce n'est pas un vrai Windows ; sur Mac Apple (émulation Rosetta), seuls
+    les programmes 64 bits tournent et seule la bibliothèque de base de .NET se charge (pour du .NET complet, le labo
+    Linux installe `dotnet-sdk-10.0`).
+  - **Android** : JDK 25, Gradle, SDK Android (dernière plateforme), commande `android create` de Google (projets passés
+    au dernier Android Gradle Plugin) ; les applis sont testées sur un **téléphone virtuel** (émulateur Android de
+    l'ordinateur, accéléré, appareil dédié « Lumen Labo » démarré tout seul) : installation, tapotements, saisie,
+    captures d'écran, journaux.
+  - Programmes graphiques : écran virtuel (captures, pilotage avec `xdotool`). Serveurs : les ports 8000–8004 d'un labo
+    s'ouvrent sur `127.0.0.1:18000+` (Linux), `19000+` (Windows), `20000+` (Android).
+  - Sécurité : conteneurs sans privilèges, mémoire / processeurs / processus limités, Internet coupable à chaud, `adb`
+    limité à l'émulateur du labo et au dossier du labo.
+  - Chaque labo se prépare une fois (de 2 à 15 min ; Linux ≈ 1,7 Go, Windows ≈ 8 Go, Android ≈ 6 Go) et se met à jour d'un clic (« Mettre à jour » reconstruit avec les
+    dernières versions, vos fichiers restent). Prérequis : Docker (OrbStack ou Docker Desktop sur Mac, Docker Desktop sur
+    Windows, Docker Engine sur Linux) ; téléphone virtuel : Android Studio.
 - **Conversation vocale façon Jarvis** (bouton « onde sonore » à côté d'Envoyer) : vous parlez, Lumen transcrit, le
   modèle répond et Lumen **lit sa réponse à voix haute pendant qu'elle s'écrit**, puis se remet à écouter. Dites « stop »
   ou appuyez sur Échap pour terminer ; Espace ou « Interrompre » coupe la parole. Les blocs de code ne sont pas lus
@@ -177,6 +198,10 @@ src/
   views/               ChatView (accueil + conversation), ModelsView, LibraryView
   voice/               conversation vocale : worker (Whisper + Piper), micro (VAD), lecture, découpage en phrases
   styles.css           tokens du design system (identiques aux variables Figma)
+agent/
+  bridge.ts            pont local de l'agent (outils, Ollama, diagnostic, usage)
+  lab.ts               labos isolés : conteneurs Docker, téléphone virtuel Android, outils lab_* et android_adb
+lab/                   recettes des labos (linux, windows, android .Dockerfile) et « android create » à jour
 ```
 
 ## Auteur et licence

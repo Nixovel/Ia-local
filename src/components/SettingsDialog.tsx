@@ -12,6 +12,7 @@ import { useVoice } from '../voice/state'
 import { runDoctor } from '../lib/setup'
 import { AUTHOR, COPYRIGHT, REPO_URL } from '../lib/authorship'
 import { Button, IconButton, Logo, useArmed, useClickOutside } from './ui'
+import { LabSettings } from './LabSettings'
 
 export function SettingsDialog() {
   const baseUrl = useStore((s) => s.baseUrl)
@@ -215,6 +216,8 @@ export function SettingsDialog() {
             </>
           )}
         </section>
+
+        <LabSettings />
 
         <section className="dialog-section">
           <span className="label">Voix (conversation façon Jarvis)</span>

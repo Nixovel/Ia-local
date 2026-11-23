@@ -5,7 +5,7 @@ import { agentInfo } from './agent'
 export type OllamaStatus = { platform: string; installed: boolean; running: boolean; canInstall: boolean; command: string }
 export type InstallEvent = { status?: 'download' | 'install' | 'start'; loaded?: number; total?: number; done?: boolean; error?: string; command?: string }
 
-async function bridge(path: string, init: RequestInit = {}) {
+export async function bridge(path: string, init: RequestInit = {}) {
   const { token } = await agentInfo()
   return fetch(path, { ...init, headers: { 'Content-Type': 'application/json', 'x-lumen-token': token, ...(init.headers ?? {}) }, cache: 'no-store' })
 }

@@ -10,5 +10,10 @@ const ACTION =
 const WEB =
   /(?:^|[^\p{L}])(?:cherche[rsz]?|recherche[rsz]?|trouve[rsz]?[- ]moi|google|sur\s+(?:internet|le\s+web|le\s+net)|en\s+ligne|m[ée]t[ée]o|quel\s+temps|temp[ée]rature|pr[ée]visions?|actu(?:alit[ée]s?)?|news|derni[èe]res?\s+(?:nouvelles|infos)|aujourd['’]hui|cette\s+semaine|ce\s+week-?end|prix\s+(?:de|du|des)|combien\s+co[ûu]te|cours\s+(?:de|du)\s+(?:la\s+)?(?:bourse|bitcoin|l['’]action)|horaires?|score|r[ée]sultats?\s+(?:du|des|de\s+la)|qui\s+a\s+gagn[ée]|quand\s+sort|sortie\s+(?:de|du)|derni[èe]re\s+version)(?=$|[^\p{L}])/iu
 
+// « teste ce programme », « compile », « dans le labo », « sous Windows / Linux / Android », « .exe / .apk »…
+const LAB =
+  /(?:^|[^\p{L}])(?:labos?|laboratoire|bac\s+à\s+sable|sandbox|machine\s+virtuelle|[ée]mulateur|t[ée]l[ée]phone\s+virtuel|compile[rsz]?|compilation|d[ée]bogue[rsz]?|teste[rsz]?\s+(?:ce|cette|mon|ma|mes|le|la|les|un|une|l['’])\s*(?:code|programme|script|appli\w*|logiciel|projet|site|jeu|fonction|exe|apk|outil|bot)|ex[ée]cute[rsz]?\s+(?:ce|cette|mon|ma|le|la|un|une)\s+(?:code|programme|script|fichier|fonction)|(?:sous|sur|dans|pour)\s+(?:un\s+)?(?:linux|windows|ubuntu|android)|appli(?:cation)?\s+android|\S+\.(?:exe|apk|msi)|apk)(?=$|[^\p{L}])/iu
+
 export const wantsAction = (text: string) => ACTION.test(text)
 export const wantsWeb = (text: string) => WEB.test(text)
+export const wantsLab = (text: string) => LAB.test(text)
