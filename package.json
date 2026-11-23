@@ -1,0 +1,59 @@
+{
+  "name": "lumen",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lumen — interface premium pour modèles d'IA locaux (Ollama) : agent, voix, recherche web.",
+  "author": "Nixovel (https://github.com/Nixovel)",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/Nixovel/Ia-local",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nixovel/Ia-local.git"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "doctor": "node scripts/doctor.mjs",
+    "start": "vite preview --host 127.0.0.1 --port 4173",
+    "fingerprint": "node scripts/fingerprint.mjs"
+  },
+  "dependencies": {
+    "@diffusionstudio/piper-wasm": "^1.0.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@huggingface/transformers": "^4.3.2",
+    "@mintplex-labs/piper-tts-web": "^1.0.5",
+    "@ricky0123/vad-web": "^0.0.31",
+    "fflate": "^0.8.3",
+    "highlight.js": "^11.12.0",
+    "idb-keyval": "^6.3.0",
+    "lucide-react": "^1.75.0",
+    "onnxruntime-common": "^1.31.1",
+    "onnxruntime-web": "^1.31.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "overrides": {
+    "onnxruntime-web": "$onnxruntime-web",
+    "onnxruntime-node": "file:./stubs/onnxruntime-node",
+    "sharp": "file:./stubs/sharp"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

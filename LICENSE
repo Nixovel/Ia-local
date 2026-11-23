@@ -1,0 +1,48 @@
+Lumen — Licence propriétaire (tous droits réservés)
+Lumen — Proprietary license (all rights reserved)
+
+Copyright © 2026 Nixovel (https://github.com/Nixovel). Tous droits réservés.
+Dépôt officiel : https://github.com/Nixovel/Ia-local
+
+Lumen (le « Logiciel ») — son code source, son architecture, son interface, ses textes, sa maquette et sa
+documentation — a été conçu et développé par Nixovel, qui en est l'unique auteur et titulaire des droits.
+Le Logiciel est publié pour être consulté, installé et utilisé ; il n'est PAS un logiciel libre.
+
+1. CE QUI EST AUTORISÉ
+   a) Télécharger, installer et utiliser le Logiciel, gratuitement, pour un usage personnel et non commercial.
+   b) Le modifier pour votre propre usage personnel, sans le diffuser.
+   c) Consulter le code et le « forker » sur GitHub dans la limite des conditions d'utilisation de GitHub
+      (ce qui ne donne aucun autre droit que ceux du présent document).
+   d) Le citer ou en parler, en mentionnant son auteur (Nixovel) et le lien du dépôt officiel.
+
+2. CE QUI EST INTERDIT sans l'accord écrit et préalable de l'auteur
+   a) Redistribuer, republier ou mettre à disposition le Logiciel, en tout ou partie, sous quelque forme que ce
+      soit (dépôt, archive, paquet, site, application, service en ligne).
+   b) Le vendre, le louer, le sous-licencier ou l'utiliser dans un cadre commercial.
+   c) Le présenter, en tout ou partie, comme votre travail ou celui d'un tiers, ou retirer, masquer ou modifier
+      les mentions d'auteur, de copyright et de licence (fichiers, en-têtes, interface, installateurs).
+   d) Diffuser une œuvre dérivée, y compris une version réécrite, restructurée, renommée, traduite dans un autre
+      langage ou reformulée avec l'aide d'une intelligence artificielle, qui reprend l'architecture, les
+      fonctionnalités, l'interface ou le code du Logiciel.
+
+3. COMPOSANTS TIERS
+   Les bibliothèques, modèles d'IA, voix et outils utilisés par le Logiciel (React, Vite, Ollama,
+   transformers.js, onnxruntime, Whisper, Supertonic, Piper, Silero VAD, etc.) restent soumis à leurs propres
+   licences, que le présent document ne modifie pas. Ils sont téléchargés depuis leurs sources officielles.
+
+4. ABSENCE DE GARANTIE
+   Le Logiciel est fourni « tel quel », sans garantie d'aucune sorte. L'auteur ne peut être tenu responsable
+   d'aucun dommage lié à son utilisation, notamment aux actions effectuées par le mode Agent sur votre ordinateur.
+
+5. DEMANDES
+   Pour toute autorisation (republication, usage commercial, collaboration) : https://github.com/Nixovel
+
+Toute utilisation hors de ces conditions constitue une contrefaçon (Code de la propriété intellectuelle,
+art. L.122-4 et L.335-2) et peut faire l'objet de poursuites.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+English summary: Copyright © 2026 Nixovel. All rights reserved. You may download, install and use Lumen for
+personal, non-commercial purposes, and modify it for your own private use. You may NOT redistribute, republish,
+sell, or present it (or any rewritten, restructured, renamed, translated or AI-reformulated derivative of it) as
+your own, nor remove the authorship, copyright or license notices, without the author's prior written
+permission. Third-party components keep their own licenses. Provided "as is", without warranty.

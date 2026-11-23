@@ -1,0 +1,7 @@
+{
+  "name": "sharp",
+  "version": "0.0.0-lumen-stub",
+  "description": "Module vide : Lumen n'utilise transformers.js que dans le navigateur (onnxruntime-web), pas dans Node.",
+  "main": "index.js",
+  "license": "MIT"
+}
