@@ -1,7 +1,7 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
-  Brain, ChevronDown, ChevronRight, Code, FileCode, FileText, Gauge, Globe, Mail, Palette, PanelLeft, PanelRight, ScanLine, Settings,
+  Brain, ChevronDown, ChevronRight, Code, FileCode, FileText, Gauge, Globe, Mail, Monitor, Palette, PanelLeft, PanelRight, ScanLine, Settings,
   Share, ShieldCheck, Terminal, TriangleExclamationPoint, Upload, WifiOff, Zap,
 } from 'lucide-react'
 import { useStore, type Attachment, type Conversation } from '../store'
@@ -20,6 +20,8 @@ import { VoiceDock } from '../components/VoiceDock'
 import { AUTHOR, REPO_URL } from '../lib/authorship'
 import { useVoice } from '../voice/state'
 import { ImageViewer } from '../components/ImageViewer'
+import { LabScreen } from '../components/LabScreen'
+import { useLabScreen } from '../lib/labScreen'
 import { Button, IconButton, Logo, StatusDot } from '../components/ui'
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('Files')
@@ -28,6 +30,7 @@ export function ChatView() {
   const voiceOn = useVoice((s) => s.phase !== 'off')
   const conv = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined))
   const panel = useStore((s) => s.panel)
+  const labScreenOpen = useLabScreen((s) => s.open)
   const selected = useStore((s) => s.selectedModel)
   const messages = conv?.messages
   const files = useMemo(() => (messages ? conversationFiles(messages) : []), [messages])
@@ -112,6 +115,7 @@ export function ChatView() {
         <FilePanel files={files} selectedKey={panel.key} autoPreview={panel.key === autoPreviewKey} />
       )}
       {panel?.type === 'image' && images.length > 0 && <ImageViewer images={images} currentId={panel.id} />}
+      {labScreenOpen && !panel && <LabScreen />}
 
       {dragging && (
         <div className="dropzone">
@@ -157,6 +161,8 @@ function OfflineBanner() {
 function Topbar({ conv, files, images }: { conv: Conversation; files: CodeFile[]; images: Attachment[] }) {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const panel = useStore((s) => s.panel)
+  const labMode = useStore((s) => s.labMode)
+  const screenOpen = useLabScreen((s) => s.open) && !panel
   const numCtx = useStore((s) => s.settingsFor(conv.model).num_ctx)
   const { toggleSidebar, openPanel, updateConversation } = useStore.getState()
   const [editing, setEditing] = useState(false)
@@ -216,6 +222,14 @@ function Topbar({ conv, files, images }: { conv: Conversation; files: CodeFile[]
         </span>
       )}
       <IconButton icon={Share} label="Exporter la conversation (.md)" onClick={exportMd} />
+      {(labMode || screenOpen) && (
+        <IconButton
+          icon={Monitor}
+          label="Écran du labo en direct (Windows, Linux, Android) : voir et piloter ce que fait le modèle"
+          active={screenOpen}
+          onClick={() => (screenOpen ? useLabScreen.getState().close() : useLabScreen.getState().show())}
+        />
+      )}
       <IconButton
         icon={PanelRight}
         label={files.length || images.length ? 'Fichiers et images de la conversation' : 'Aucun fichier pour le moment'}

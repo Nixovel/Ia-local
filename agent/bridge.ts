@@ -19,7 +19,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { LAB_TOOL_NAMES, labAction, labStatus, labTool } from './lab'
+import { isLab, LAB_TOOL_NAMES, labAction, labInput, labScreen, labStatus, labTool, parseScreenInput } from './lab'
 
 const TOKEN = randomBytes(24).toString('hex')
 const MAX_OUT = 20_000
@@ -603,9 +603,44 @@ const handler: Connect.NextHandleFunction = async (req, res, next) => {
         emit({ done: true })
       } catch (e) {
         const m = (e as Error).message
-        emit(m === 'android-license' ? { error: 'Licence du SDK Android à accepter (Réglages → Labos).', needsLicense: true } : { error: m })
+        emit(
+          m === 'android-license'
+            ? { error: 'Licence du SDK Android à accepter (Réglages → Labos).', needsLicense: true, needs: m }
+            : m === 'windows-license'
+              ? { error: 'Licence de Windows 11 à accepter (Réglages → Labos → Windows complet).', needs: m }
+              : m === 'windows-iso'
+                ? { error: "ISO de Windows 11 ARM64 introuvable : téléchargez-la chez Microsoft (dans Téléchargements) ou choisissez-la.", needs: m }
+                : { error: m },
+        )
       }
       return res.end()
+    }
+    // Écran en direct d'un labo (panneau « Écran du labo ») : image PNG, 204 si le labo est éteint
+    if (req.url?.startsWith('/agent/lab/screen') && req.method === 'GET') {
+      if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })
+      const lab = new URL(req.url, 'http://127.0.0.1').searchParams.get('lab')
+      if (!isLab(lab)) return send(res, 400, { ok: false, output: 'Labo inconnu' })
+      const png = await labScreen(lab)
+      res.setHeader('Cache-Control', 'no-store')
+      if (!png) {
+        res.statusCode = 204
+        return res.end()
+      }
+      res.statusCode = 200
+      res.setHeader('Content-Type', 'image/png')
+      return res.end(png)
+    }
+    if (req.url === '/agent/lab/input' && req.method === 'POST') {
+      if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })
+      const body = (await readBody(req)) as Record<string, unknown>
+      const ev = parseScreenInput(body)
+      if (!isLab(body.lab) || !ev) return send(res, 400, { ok: false, output: 'Commande invalide' })
+      try {
+        await labInput(body.lab, ev)
+      } catch (e) {
+        return send(res, 409, { ok: false, output: (e as Error).message }) // labo éteint, etc.
+      }
+      return send(res, 200, { ok: true })
     }
     if (req.url === '/agent/system' && req.method === 'GET') {
       if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })

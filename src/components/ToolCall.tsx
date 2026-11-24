@@ -1,11 +1,13 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AppWindow, Camera, Check, ChevronDown, CloudSun, Code, Cpu, Download, Eye, FilePen, FileText, FlaskConical, FolderInput, FolderOpen, Globe, LoaderCircle, Search, ShieldCheck, Smartphone, Terminal, X,
   type LucideIcon,
 } from 'lucide-react'
 import { useStore, type ToolCall } from '../store'
 import { decideTool } from '../chat'
+import { LAB_LABELS, type LabId } from '../lib/lab'
+import { useLabScreen } from '../lib/labScreen'
 import { Button } from './ui'
 
 const META: Record<string, { label: string; icon: LucideIcon; detail: (a: Record<string, unknown>) => string }> = {
@@ -25,14 +27,15 @@ const META: Record<string, { label: string; icon: LucideIcon; detail: (a: Record
   lab_run: { label: 'Labo', icon: FlaskConical, detail: (a) => `${labName(a)} · ${String(a.command ?? '')}` },
   lab_write_file: { label: 'Labo · écrire', icon: FilePen, detail: (a) => `${labName(a)} · ${String(a.path ?? '')}` },
   lab_read_file: { label: 'Labo · lire', icon: FileText, detail: (a) => `${labName(a)} · ${String(a.path ?? '')}` },
-  lab_screenshot: { label: 'Labo · écran', icon: Camera, detail: (a) => (a.lab === 'android' ? 'téléphone virtuel' : `écran virtuel ${labName(a)}`) },
+  lab_screenshot: { label: 'Labo · écran', icon: Camera, detail: (a) => (a.lab === 'android' ? 'téléphone virtuel' : a.lab === 'windows-vm' ? 'écran de Windows (VM)' : `écran virtuel ${labName(a)}`) },
   lab_copy_in: { label: 'Copier dans le labo', icon: FolderInput, detail: (a) => `${String(a.source ?? '')} → ${labName(a)}` },
   android_adb: { label: 'Téléphone virtuel', icon: Smartphone, detail: (a) => `adb ${String(a.args ?? a.command ?? '')}` },
 }
 
-const LAB_NAMES: Record<string, string> = { linux: 'Linux', windows: 'Windows', android: 'Android' }
+const isLabId = (x: string): x is LabId => x in LAB_LABELS
 function labName(a: Record<string, unknown>) {
-  return LAB_NAMES[String(a.lab ?? 'linux')] ?? String(a.lab)
+  const id = String(a.lab ?? 'linux')
+  return isLabId(id) ? LAB_LABELS[id] : id
 }
 
 const STATUS: Record<ToolCall['status'], string> = {
@@ -50,6 +53,12 @@ export function ToolCallView({ call, msgId }: { call: ToolCall; msgId: string })
   const viewable = (call.name === 'write_file' || call.name === 'lab_write_file') && call.status === 'done'
   const waiting = call.status === 'pending' && call.needsApproval
   const [open, setOpen] = useState(false)
+  // Le modèle travaille sur un écran (machine Windows, capture, téléphone) : on l'affiche à côté du chat
+  const screenLab = call.name === 'android_adb' ? 'android' : call.name.startsWith('lab_') ? String(call.args.lab ?? 'linux') : ''
+  const showScreen = call.status === 'running' && (screenLab === 'windows-vm' || screenLab === 'android' || call.name === 'lab_screenshot')
+  useEffect(() => {
+    if (showScreen && isLabId(screenLab)) useLabScreen.getState().auto(screenLab)
+  }, [showScreen, screenLab])
   const preview =
     call.name === 'write_file' || call.name === 'lab_write_file'
       ? String(call.args.content ?? '')

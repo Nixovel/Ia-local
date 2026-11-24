@@ -136,6 +136,44 @@ Version installée (plus légère) : `npm run build && npm start` (http://127.0.
   - Chaque labo se prépare une fois (de 2 à 15 min ; Linux ≈ 1,7 Go, Windows ≈ 8 Go, Android ≈ 6 Go) et se met à jour d'un clic (« Mettre à jour » reconstruit avec les
     dernières versions, vos fichiers restent). Prérequis : Docker (OrbStack ou Docker Desktop sur Mac, Docker Desktop sur
     Windows, Docker Engine sur Linux) ; téléphone virtuel : Android Studio.
+  - **Écran du labo** (bouton « écran » en haut de la conversation) : l'écran du labo s'affiche **en direct à côté du
+    chat** (Windows complet, Linux, Windows Wine, téléphone Android). Vous voyez ce que fait le modèle et vous pouvez
+    piloter vous-même : clic, clic droit, molette, clavier (⌘ = Ctrl sous Windows). Il s'ouvre tout seul quand le modèle
+    travaille dans la machine Windows ou sur le téléphone.
+- **Windows complet** (labo `windows-vm`, Mac à processeur Apple) : un **vrai Windows 11 ARM64** en machine virtuelle,
+  pour ce que Wine ne sait pas faire (.NET complet, PowerShell, registre, services, programmes Windows récents).
+  - Moteur : QEMU (`brew install qemu`) avec l'hyperviseur du Mac (`-accel hvf`), machine `virt`, UEFI edk2 fourni avec
+    QEMU, disque NVMe, réseau virtio. Sur ce Mac, Docker (OrbStack) n'offre pas `/dev/kvm` : un vrai Windows ne peut pas
+    tourner en conteneur, d'où la machine virtuelle. Le contrôleur d'interruptions est le GICv3 émulé par QEMU avec ITS
+    (`kernel-irqchip=off,its=on`) : sans lui, pas d'interruptions MSI, et les disques et l'USB de Windows plafonnent
+    à ≈ 4 Mo/s (installation mesurée 10 fois plus lente).
+  - Installation **sans intervention** (Réglages → Labos → « Windows complet » → Préparer, ≈ 15 min, une seule fois ; le
+    Mac doit rester éveillé, branché et ouvert : en veille, la machine virtuelle est suspendue) :
+    1. téléchargez l'ISO officielle « Windows 11 (ISO édition multiple pour Arm64) » sur
+       [microsoft.com/software-download/windows11arm64](https://www.microsoft.com/fr-fr/software-download/windows11arm64)
+       (≈ 8,5 Go) : Lumen la trouve dans Téléchargements (ou « Choisir… ») ;
+    2. acceptez la licence de Windows 11 dans Lumen (Windows 11 Pro **non activé**, installé avec la clé générique
+       d'installation publiée par Microsoft) ;
+    3. Lumen télécharge les pilotes virtio ARM64 de Red Hat (virtio-win, ≈ 840 Mo, seuls les pilotes sont gardés), crée
+       un CD d'installation (`lab/windows-vm/autounattend.xml` rempli : langue de l'ISO, fuseau horaire du Mac, compte
+       local `lumen`, mot de passe aléatoire) et lance l'installation. Au premier démarrage,
+       `lab/windows-vm/setup.ps1` installe les pilotes, **OpenSSH Server** (clé SSH propre à Lumen ; dernière version de
+       Win32-OpenSSH sur GitHub, sinon la fonctionnalité de Windows, limitée à 10 min car Windows Update peut rester
+       occupé des heures après l'installation), PowerShell 7 et LLVM-MinGW (dernières versions publiées), puis Lumen
+       prend un **instantané « propre »** du disque.
+    Testé sur Mac M5 : Windows 11 26H2 (build 26300) installé en ≈ 6 min, configuration en quelques minutes selon la
+    connexion ; PowerShell 7.7, LLVM-MinGW (clang 23).
+  - L'agent y travaille avec les mêmes outils, `lab: "windows-vm"` : `lab_run` exécute du **PowerShell 7 par SSH**
+    (administrateur, `C:\labo` par défaut), `lab_write_file` / `lab_read_file` passent par SSH (copie des fichiers de
+    `C:\labo` dans `~/Lumen Labo/windows-vm`), `lab_copy_in` par `scp`, et `lab_screenshot` capture l'écran par QMP
+    (`screendump`). Compilation : `clang prog.c -o prog.exe` (ARM64 natif) ou `x86_64-w64-mingw32-clang` (x64, lancé par
+    l'émulation x64 de Windows 11) ; programme graphique sur le bureau : `lumen-gui C:\labo\app.exe`.
+  - Démarre tout seul quand le modèle s'en sert (≈ 20 s), s'arrête proprement (≈ 10 s), revient à Windows tout juste
+    installé en ≈ 10 s (« Réinitialiser »), se supprime pour libérer la place (disque ≈ 20 Go ; l'ISO de 8,5 Go peut être
+    effacée de Téléchargements après l'installation). Internet coupable (la machine redémarre), serveurs des ports
+    8000–8004 sur `127.0.0.1:21000+`, SSH sur `127.0.0.1:21022` (clé `~/.lumen/windows-vm/id_ed25519`). Fichiers de la
+    machine : `~/.lumen/windows-vm`. Affichage de base (écran du micrologiciel `ramfb`, pas de pilote graphique) :
+    800 × 600.
 - **Conversation vocale façon Jarvis** (bouton « onde sonore » à côté d'Envoyer) : vous parlez, Lumen transcrit, le
   modèle répond et Lumen **lit sa réponse à voix haute pendant qu'elle s'écrit**, puis se remet à écouter. Dites « stop »
   ou appuyez sur Échap pour terminer ; Espace ou « Interrompre » coupe la parole. Les blocs de code ne sont pas lus
@@ -200,8 +238,11 @@ src/
   styles.css           tokens du design system (identiques aux variables Figma)
 agent/
   bridge.ts            pont local de l'agent (outils, Ollama, diagnostic, usage)
-  lab.ts               labos isolés : conteneurs Docker, téléphone virtuel Android, outils lab_* et android_adb
+  lab.ts               labos isolés : conteneurs Docker, téléphone virtuel Android, outils lab_* et android_adb, écran en direct
+  winvm.ts             labo « Windows complet » : machine virtuelle Windows 11 ARM (QEMU, SSH, QMP)
+  proc.ts              lancement de processus partagé par les labos
 lab/                   recettes des labos (linux, windows, android .Dockerfile) et « android create » à jour
+  windows-vm/          installation sans intervention de Windows 11 ARM (autounattend.xml, setup.ps1)
 ```
 
 ## Auteur et licence

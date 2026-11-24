@@ -995,7 +995,7 @@ input[type='range']::-moz-range-thumb { width: 8px; height: 8px; border-radius: 
 .lab-row + .lab-row { border-top: 1px solid var(--border-subtle); }
 .lab-row .toggle-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .lab-icon { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); }
-.lab-name { display: flex; align-items: center; gap: 8px; }
+.lab-name { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .lab-pill { padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 15px; font-weight: 500; background: var(--bg-hover); color: var(--text-tertiary); }
 .lab-pill.tone-success { background: var(--success-soft); color: var(--success); }
 .lab-pill.tone-accent { background: var(--accent-soft); color: var(--accent); }
@@ -1003,3 +1003,18 @@ input[type='range']::-moz-range-thumb { width: 8px; height: 8px; border-radius: 
 .lab-net.is-on { background: var(--info-soft); color: var(--info); }
 .lab-net.is-off svg { opacity: 0.4; }
 .caption.accent { color: var(--accent); }
+.lab-pill.tone-danger { background: var(--danger-soft); color: var(--danger); }
+
+/* ---------- Écran du labo en direct (à côté du chat) ---------- */
+.lab-screen .panel-bar { overflow-x: auto; }
+.lab-screen-canvas {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 14px;
+  background: var(--bg-app); outline: none; overflow: hidden;
+}
+.lab-screen-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-soft); }
+.lab-screen-canvas img {
+  display: block; max-width: 100%; max-height: 100%; border-radius: 6px; user-select: none;
+  box-shadow: 0 0 0 1px var(--border-default), 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+.lab-screen-canvas.is-control img { cursor: crosshair; }
+.lab-screen-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 320px; text-align: center; }

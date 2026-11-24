@@ -1,9 +1,35 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
-// Labos isolés (Linux, Windows, Android) côté interface : état et actions, via le pont local (agent/lab.ts).
+// Labos isolés (Linux, Windows, Android, Windows complet) côté interface : état, actions, écran en direct,
+// via le pont local (agent/lab.ts, agent/winvm.ts).
 import { agentInfo, resetAgentInfo } from './agent'
 
-export type LabId = 'linux' | 'windows' | 'android'
-export const LAB_IDS: LabId[] = ['linux', 'windows', 'android']
+export type DockerLabId = 'linux' | 'windows' | 'android'
+export type LabId = DockerLabId | 'windows-vm'
+/** Labos en conteneur Docker (la machine virtuelle Windows a sa propre ligne dans les réglages). */
+export const LAB_IDS: DockerLabId[] = ['linux', 'windows', 'android']
+export const LAB_LABELS: Record<LabId, string> = { 'windows-vm': 'Windows (VM)', linux: 'Linux', windows: 'Windows (Wine)', android: 'Android' }
+
+/** Machine virtuelle Windows 11 ARM (labo « windows-vm »). */
+export type VmStatus = {
+  supported: boolean
+  qemu: string | null
+  iso: { path: string; size: number } | null
+  isoPage: string
+  license: boolean
+  phase: 'none' | 'installing' | 'ready'
+  state: 'off' | 'booting' | 'on'
+  busy: string | null
+  progress: string | null
+  minutes: number
+  error: string | null
+  versions: string | null
+  disk: number
+  network: boolean
+  window: boolean
+  ssh: string
+  ports: string
+  workspace: string
+}
 
 export type LabState = {
   image: boolean
@@ -19,23 +45,26 @@ export type LabState = {
 export type LabStatus = {
   docker: { installed: boolean; running: boolean; provider?: string; version?: string; canStart: boolean }
   root: string
-  labs: Record<LabId, LabState>
+  labs: Record<DockerLabId, LabState>
   android: { sdk: string | null; emulator: boolean; image: string | null; device: 'off' | 'booting' | 'on'; starting: boolean; window: boolean; licenses: boolean }
+  vm: VmStatus
 }
 
 export type LabEvent = {
-  status?: 'docker' | 'build' | 'create' | 'start' | 'emulator'
+  status?: 'docker' | 'build' | 'create' | 'start' | 'emulator' | 'vm-download' | 'vm-iso' | 'vm-install' | 'vm-finalize' | 'vm-boot'
   step?: number
   total?: number
   text?: string
   done?: boolean
   error?: string
   needsLicense?: boolean
+  needs?: 'android-license' | 'windows-license' | 'windows-iso'
 }
 
 export type LabActionName =
   | 'prepare' | 'update' | 'stop' | 'reset' | 'network' | 'reveal' | 'docker'
   | 'emulator-start' | 'emulator-stop' | 'emulator-window' | 'android-license'
+  | 'windows-license' | 'vm-iso' | 'vm-window' | 'vm-delete'
 
 async function call(init: RequestInit = {}, retry = true): Promise<Response> {
   const { token } = await agentInfo()
@@ -55,10 +84,55 @@ export async function labStatus(): Promise<LabStatus> {
 
 export class LabError extends Error {
   needsLicense: boolean
-  constructor(message: string, needsLicense = false) {
+  needs?: LabEvent['needs']
+  constructor(message: string, needsLicense = false, needs?: LabEvent['needs']) {
     super(message)
     this.needsLicense = needsLicense
+    this.needs = needs
   }
+}
+
+/** Image de l'écran d'un labo allumé (null s'il est éteint). */
+export async function labScreen(lab: LabId, signal?: AbortSignal): Promise<Blob | null> {
+  const { token } = await agentInfo()
+  const r = await fetch(`/agent/lab/screen?lab=${encodeURIComponent(lab)}`, { headers: { 'x-lumen-token': token }, cache: 'no-store', signal })
+  if (r.status === 401) {
+    resetAgentInfo()
+    throw new LabError('Jeton expiré')
+  }
+  if (r.status === 204) return null
+  if (!r.ok) throw new LabError(`Écran indisponible (${r.status})`)
+  return r.blob()
+}
+
+export type ScreenInput = {
+  type: 'click' | 'scroll' | 'key'
+  /** Position relative (0 à 1) et en pixels de la capture */
+  x?: number
+  y?: number
+  px?: number
+  py?: number
+  button?: 'left' | 'right' | 'middle'
+  double?: boolean
+  dy?: number
+  /** KeyboardEvent.code (touche physique) et KeyboardEvent.key */
+  code?: string
+  key?: string
+  ctrl?: boolean
+  alt?: boolean
+  shift?: boolean
+  meta?: boolean
+}
+
+/** Clic, molette ou touche envoyés à l'écran d'un labo. */
+export async function labInput(lab: LabId, ev: ScreenInput): Promise<void> {
+  const { token } = await agentInfo()
+  const r = await fetch('/agent/lab/input', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-lumen-token': token },
+    body: JSON.stringify({ lab, ...ev }),
+  })
+  if (!r.ok) throw new LabError(((await r.json().catch(() => ({}))) as { output?: string }).output ?? `Commande refusée (${r.status})`)
 }
 
 /** Lance une action (préparer, démarrer le téléphone…) ; `onEvent` reçoit la progression. */
@@ -81,7 +155,7 @@ export async function labAction(action: LabActionName, lab?: LabId | null, value
       onEvent?.(last)
     }
   }
-  if (last.error) throw new LabError(last.error, !!last.needsLicense)
+  if (last.error) throw new LabError(last.error, !!last.needsLicense, last.needs)
 }
 
 export function progressLabel(e: LabEvent | null | undefined): string {
@@ -96,6 +170,12 @@ export function progressLabel(e: LabEvent | null | undefined): string {
       return 'Démarrage…'
     case 'emulator':
       return 'Démarrage du téléphone virtuel…'
+    case 'vm-download':
+    case 'vm-iso':
+    case 'vm-install':
+    case 'vm-finalize':
+    case 'vm-boot':
+      return e.text ?? 'Machine Windows…'
     default:
       return ''
   }

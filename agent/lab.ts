@@ -6,10 +6,13 @@
  *  - Windows : programmes Windows via Wine, compilation .exe (MinGW-w64), PowerShell (conteneur x86-64) ;
  *  - Android : construction d'applications (JDK, Gradle, SDK Android, conteneur x86-64) et téléphone virtuel
  *    (émulateur Android de l'ordinateur, accéléré, avec un appareil dédié « Lumen_Labo »).
+ *  - Windows complet (windows-vm) : vraie machine virtuelle Windows 11 ARM (QEMU + hyperviseur du Mac), pilotée
+ *    par SSH et QMP — voir agent/winvm.ts.
  *
  * Isolation : un conteneur par labo, sans privilèges, mémoire / processeurs / processus limités ; seul le dossier
  * « ~/Lumen Labo/<labo> » y est partagé (/workspace). Internet s'active ou se coupe à chaud. Le téléphone virtuel est
  * piloté par adb, uniquement sur l'émulateur du labo (jamais sur un vrai téléphone branché).
+ * L'écran de chaque labo se regarde et se pilote en direct dans Lumen (labScreen, labInput : panneau « Écran du labo »).
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -17,10 +20,16 @@ import { existsSync, readdirSync, readFileSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { clip, exec, sleep, type Out } from './proc'
+import { parseScreenInput, VM_PORT_BASE, vmAction, vmInput, vmScreen, vmStatus, vmTool, type ScreenInput } from './winvm'
+export { parseScreenInput }
 
-export type LabId = 'linux' | 'windows' | 'android'
-export const LAB_IDS: LabId[] = ['linux', 'windows', 'android']
+export type DockerLab = 'linux' | 'windows' | 'android'
+export type LabId = DockerLab | 'windows-vm'
+export const DOCKER_LABS: DockerLab[] = ['linux', 'windows', 'android']
+export const LAB_IDS: LabId[] = [...DOCKER_LABS, 'windows-vm']
 export const isLab = (x: unknown): x is LabId => LAB_IDS.includes(x as LabId)
+export type { ScreenInput }
 export const LAB_TOOL_NAMES = new Set(['lab_run', 'lab_write_file', 'lab_read_file', 'lab_screenshot', 'lab_copy_in', 'android_adb'])
 
 type ToolResult = { ok: boolean; output: string; image?: string }
@@ -32,55 +41,11 @@ const isWin = process.platform === 'win32'
 const LAB_DIR = fileURLToPath(new URL('../lab', import.meta.url))
 export const WORK_ROOT = path.join(os.homedir(), 'Lumen Labo')
 const PREFS_FILE = path.join(WORK_ROOT, '.lumen-labs.json')
-const MAX_OUT = 20_000
-const LABEL: Record<LabId, string> = { linux: 'Linux', windows: 'Windows', android: 'Android' }
+const LABEL: Record<LabId, string> = { linux: 'Linux', windows: 'Windows', android: 'Android', 'windows-vm': 'Windows (VM)' }
 /** Ports 8000 à 8004 du labo, publiés sur l'ordinateur (127.0.0.1 seulement). */
-export const PORT_BASE: Record<LabId, number> = { linux: 18000, windows: 19000, android: 20000 }
-const ctr = (lab: LabId) => `lumen-lab-${lab}`
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const clip = (s: string) => (s.length > MAX_OUT ? `${s.slice(0, MAX_OUT)}\n… (${s.length - MAX_OUT} caractères tronqués)` : s)
+export const PORT_BASE: Record<LabId, number> = { linux: 18000, windows: 19000, android: 20000, 'windows-vm': VM_PORT_BASE }
+const ctr = (lab: DockerLab) => `lumen-lab-${lab}`
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-
-// ---------- Processus ----------
-type Out = { code: number | null; out: string; stdout: Buffer; timedOut: boolean }
-
-function exec(cmd: string, args: string[], o: { input?: string; timeout?: number; onData?: (s: string) => void; maxText?: number; env?: NodeJS.ProcessEnv } = {}): Promise<Out> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, DOCKER_CLI_HINTS: 'false', ...o.env } })
-    const max = o.maxText ?? MAX_OUT * 2
-    let out = ''
-    const bufs: Buffer[] = []
-    let size = 0
-    let timedOut = false
-    const text = (d: Buffer) => {
-      const s = d.toString()
-      o.onData?.(s)
-      if (out.length < max) out += s
-    }
-    child.stdout.on('data', (d: Buffer) => {
-      if (size < 48 * 2 ** 20) {
-        bufs.push(d)
-        size += d.length
-      }
-      text(d)
-    })
-    child.stderr.on('data', text)
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, o.timeout ?? 60_000)
-    child.on('error', (e) => {
-      clearTimeout(timer)
-      resolve({ code: -1, out: String(e), stdout: Buffer.concat(bufs), timedOut })
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code, out, stdout: Buffer.concat(bufs), timedOut })
-    })
-    child.stdin.on('error', () => {}) // processus déjà terminé : on ignore
-    child.stdin.end(o.input)
-  })
-}
 
 // ---------- Préférences (Internet par labo, fenêtre du téléphone, versions installées) ----------
 type Prefs = { androidWindow?: boolean; network?: Partial<Record<LabId, boolean>>; versions?: Record<string, string> }
@@ -163,7 +128,7 @@ async function ensureDocker(emit: Emit) {
 
 // ---------- Images et conteneurs ----------
 /** Nom de l'image : change quand la recette du labo change (le labo est alors reconstruit). */
-function imageTag(lab: LabId): string {
+function imageTag(lab: DockerLab): string {
   const h = createHash('sha256')
   const files = [`${lab}.Dockerfile`, 'entrypoint.sh', ...(lab === 'android' ? ['android-create.sh'] : [])]
   for (const f of files) if (existsSync(path.join(LAB_DIR, f))) h.update(readFileSync(path.join(LAB_DIR, f)))
@@ -172,7 +137,7 @@ function imageTag(lab: LabId): string {
 
 type Ctr = { running: boolean; image: string; network: boolean; ports: boolean }
 
-async function inspect(lab: LabId): Promise<Ctr | null> {
+async function inspect(lab: DockerLab): Promise<Ctr | null> {
   const r = await docker(['inspect', '--type', 'container', ctr(lab)], { timeout: 10_000 })
   if (r.code !== 0) return null
   try {
@@ -204,9 +169,9 @@ export async function acceptAndroidLicense() {
   await fs.writeFile(path.join(OWN_LICENSES, 'android-sdk-arm-dbt-license'), '\n859f317696f67ef3d7f30a50a5560e7834b43903')
 }
 
-const busy = new Map<LabId, string>()
+const busy = new Map<DockerLab, string>()
 
-async function build(lab: LabId, tag: string, emit: Emit, fresh: boolean) {
+async function build(lab: DockerLab, tag: string, emit: Emit, fresh: boolean) {
   const args = ['build', '--progress=plain', '-t', tag, '-f', path.join(LAB_DIR, `${lab}.Dockerfile`)]
   if (lab === 'android') {
     const lic = licensesDir()
@@ -239,13 +204,13 @@ async function build(lab: LabId, tag: string, emit: Emit, fresh: boolean) {
 }
 
 /** Supprime les anciennes images de ce labo (remplacées par une recette plus récente). */
-async function cleanupImages(lab: LabId, keep: string) {
+async function cleanupImages(lab: DockerLab, keep: string) {
   const r = await docker(['images', '--format', '{{.Repository}}:{{.Tag}}', `lumen-lab-${lab}`], { timeout: 15_000 })
   for (const t of r.stdout.toString().split('\n').map((s) => s.trim()))
     if (t && t !== keep && t.startsWith(`lumen-lab-${lab}:`)) await docker(['rmi', t], { timeout: 60_000 })
 }
 
-async function create(lab: LabId, tag: string, emit: Emit) {
+async function create(lab: DockerLab, tag: string, emit: Emit) {
   busy.set(lab, 'create')
   emit({ status: 'create' })
   const ws = path.join(WORK_ROOT, lab)
@@ -267,16 +232,16 @@ async function create(lab: LabId, tag: string, emit: Emit) {
   if (r.code !== 0) throw new Error(`Démarrage du labo ${LABEL[lab]} impossible : ${r.out.trim()}`)
 }
 
-const VERSION_CMD: Record<LabId, string> = {
+const VERSION_CMD: Record<DockerLab, string> = {
   linux: String.raw`. /etc/os-release; printf '%s · Node.js %s · %s · GCC %s' "$PRETTY_NAME" "$(node -v)" "$(python3 -V)" "$(gcc -dumpfullversion)"`,
   windows: String.raw`. /etc/os-release; printf '%s · PowerShell %s · MinGW-w64 GCC %s · %s' "$(wine --version)" "$(pwsh -NoProfile -c '$PSVersionTable.PSVersion.ToString()')" "$(x86_64-w64-mingw32-gcc -dumpfullversion)" "$PRETTY_NAME"`,
   android: String.raw`printf 'JDK %s · Gradle %s · SDK %s· build-tools %s' "$(java -version 2>&1 | head -1 | cut -d'"' -f2)" "$(cat /opt/gradle/VERSION 2>/dev/null)" "$(ls $ANDROID_HOME/platforms | tr '\n' ' ')" "$(ls $ANDROID_HOME/build-tools | tr '\n' ' ')"`,
 }
 
-const inflight = new Map<LabId, Promise<void>>()
+const inflight = new Map<DockerLab, Promise<void>>()
 
 /** Prépare le labo si besoin (Docker démarré, image construite, conteneur créé et démarré). */
-export function ensureLab(lab: LabId, emit: Emit = noop, opts: { rebuild?: boolean } = {}): Promise<void> {
+export function ensureLab(lab: DockerLab, emit: Emit = noop, opts: { rebuild?: boolean } = {}): Promise<void> {
   const cur = inflight.get(lab)
   if (cur) return cur
   const p = (async () => {
@@ -514,7 +479,7 @@ async function androidAdb(raw: string, emit: Emit): Promise<ToolResult> {
 
 // ---------- Outils de l'agent ----------
 /** Chemin dans le labo : relatif à /workspace ; dans le labo Windows, « C:\labo\… » = /workspace/…, « C:\… » = disque C: de Wine. */
-function labPath(lab: LabId, p: string): string {
+function labPath(lab: DockerLab, p: string): string {
   let x = (p || '').trim().replace(/^["']|["']$/g, '')
   if (!x || x === '.') return '/workspace'
   if (lab === 'windows' && /^[a-z]:([\\/]|$)/i.test(x)) {
@@ -545,12 +510,67 @@ async function resizePng(buf: Buffer, max: number): Promise<Buffer> {
 }
 
 const isPng = (b: Buffer) => b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+/** Capture de l'écran virtuel (Xvfb :99) des labos Linux et Windows (Wine). */
+const SCREEN_CMD = 'import -display :99 -window root png:- 2>/dev/null || magick import -display :99 -window root png:- 2>/dev/null || xwd -display :99 -root -silent | convert xwd:- png:-'
+
+// ---------- Écran en direct (panneau « Écran du labo » de Lumen) ----------
+/** Image PNG de l'écran d'un labo déjà allumé (null s'il est éteint : on ne démarre rien pour regarder). */
+export async function labScreen(lab: LabId): Promise<Buffer | null> {
+  if (lab === 'windows-vm') return vmScreen()
+  if (lab === 'android') {
+    const adb = await adbBin()
+    if (!adb || (await deviceState()) !== 'on') return null
+    const r = await exec(adb, ['-s', SERIAL, 'exec-out', 'screencap', '-p'], { timeout: 20_000, maxText: 1000 })
+    return isPng(r.stdout) ? r.stdout : null
+  }
+  if (!(await inspect(lab))?.running) return null
+  const r = await docker(['exec', ctr(lab), 'sh', '-c', SCREEN_CMD], { timeout: 20_000, maxText: 1000 })
+  return isPng(r.stdout) ? r.stdout : null
+}
+
+const XDO_KEYS: Record<string, string> = {
+  Enter: 'Return', Backspace: 'BackSpace', Tab: 'Tab', Escape: 'Escape', Delete: 'Delete', Home: 'Home', End: 'End', PageUp: 'Prior',
+  PageDown: 'Next', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', ' ': 'space',
+}
+const ADB_KEYS: Record<string, number> = { Enter: 66, Backspace: 67, Escape: 4, Tab: 61, ArrowUp: 19, ArrowDown: 20, ArrowLeft: 21, ArrowRight: 22, Delete: 112, Home: 122, End: 123 }
+
+/** Clic, molette ou touche envoyés à l'écran d'un labo allumé (coordonnées en pixels de la capture). */
+export async function labInput(lab: LabId, ev: ScreenInput): Promise<void> {
+  if (lab === 'windows-vm') return vmInput(ev)
+  const px = Math.max(0, Math.round(ev.px ?? 0))
+  const py = Math.max(0, Math.round(ev.py ?? 0))
+  if (lab === 'android') {
+    const adb = await adbBin()
+    if (!adb || (await deviceState()) !== 'on') throw new Error('Le téléphone virtuel est éteint.')
+    const sh = (cmd: string) => exec(adb, ['-s', SERIAL, 'shell', cmd], { timeout: 15_000 })
+    if (ev.type === 'click') await sh(ev.button === 'right' ? 'input keyevent 4' : `input tap ${px} ${py}`)
+    else if (ev.type === 'scroll') await sh(`input swipe ${px} ${py} ${px} ${Math.max(0, py - Math.round((ev.dy ?? 1) * 300))} 200`)
+    else if (ev.type === 'key') {
+      const k = ADB_KEYS[ev.key ?? '']
+      if (k) await sh(`input keyevent ${k}`)
+      else if (ev.key && [...ev.key].length === 1 && !ev.ctrl && !ev.meta) await sh(`input text ${shq(ev.key === ' ' ? '%s' : ev.key)}`)
+    }
+    return
+  }
+  if (!(await inspect(lab))?.running) throw new Error(`Le labo ${LABEL[lab]} est arrêté.`)
+  const xdo = (...args: string[]) => docker(['exec', '-e', 'DISPLAY=:99', ctr(lab), 'xdotool', ...args], { timeout: 15_000 })
+  const btn = ev.button === 'right' ? '3' : ev.button === 'middle' ? '2' : '1'
+  if (ev.type === 'click') await xdo('mousemove', String(px), String(py), 'click', ...(ev.double ? ['--repeat', '2'] : []), btn)
+  else if (ev.type === 'scroll') await xdo('mousemove', String(px), String(py), 'click', '--repeat', String(Math.min(10, Math.max(1, Math.round(Math.abs(ev.dy ?? 1))))), (ev.dy ?? 0) < 0 ? '4' : '5')
+  else if (ev.type === 'key' && ev.key) {
+    const mods = [ev.ctrl || ev.meta ? 'ctrl' : '', ev.alt ? 'alt' : ''].filter(Boolean)
+    const named = XDO_KEYS[ev.key] ?? (/^F\d{1,2}$/.test(ev.key) ? ev.key : null)
+    if (named || mods.length) await xdo('key', '--', [...mods, named ?? ev.key.toLowerCase()].join('+'))
+    else if ([...ev.key].length === 1) await xdo('type', '--', ev.key)
+  }
+}
 
 export async function labTool(name: string, a: Record<string, unknown>, cwd: string, emit: Emit = noop): Promise<ToolResult> {
   const str = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : '')
   if (name === 'android_adb') return androidAdb(str('args') || str('command'), emit)
   const lab = (str('lab') || 'linux').toLowerCase()
-  if (!isLab(lab)) return { ok: false, output: `Labo inconnu : « ${lab} ». Labos : linux, windows, android.` }
+  if (!isLab(lab)) return { ok: false, output: `Labo inconnu : « ${lab} ». Labos : ${LAB_IDS.join(', ')}.` }
+  if (lab === 'windows-vm') return vmTool(name, a, cwd, emit, resizePng)
 
   if (name === 'lab_screenshot' && lab === 'android') {
     await ensureEmulator(emit)
@@ -597,10 +617,7 @@ export async function labTool(name: string, a: Record<string, unknown>, cwd: str
       return { ok: true, output: r.stdout.toString('utf8') + (r.stdout.length >= 200_000 ? '\n… (fichier tronqué)' : '') }
     }
     case 'lab_screenshot': {
-      const r = await docker(
-        ['exec', c, 'sh', '-c', 'import -display :99 -window root png:- 2>/dev/null || magick import -display :99 -window root png:- 2>/dev/null || xwd -display :99 -root -silent | convert xwd:- png:-'],
-        { timeout: 30_000, maxText: 1000 },
-      )
+      const r = await docker(['exec', c, 'sh', '-c', SCREEN_CMD], { timeout: 30_000, maxText: 1000 })
       if (!isPng(r.stdout)) return { ok: false, output: `Capture impossible : ${r.out.slice(0, 300)}` }
       return { ok: true, output: `Capture de l'écran virtuel du labo ${LABEL[lab]} (1280 × 800).`, image: `data:image/png;base64,${r.stdout.toString('base64')}` }
     }
@@ -635,10 +652,10 @@ export type LabState = {
 export async function labStatus() {
   const d = await dockerInfo()
   const prefs = await readPrefs()
-  const labs = {} as Record<LabId, LabState>
+  const labs = {} as Record<DockerLab, LabState>
   const listed = d.running ? await docker(['images', '--format', '{{.Repository}}:{{.Tag}}', '--filter', 'reference=lumen-lab-*'], { timeout: 15_000 }) : null
   const images = new Set((listed?.stdout.toString() ?? '').split('\n').map((s) => s.trim()))
-  for (const lab of LAB_IDS) {
+  for (const lab of DOCKER_LABS) {
     const tag = imageTag(lab)
     const c = d.running ? await inspect(lab) : null
     labs[lab] = {
@@ -668,11 +685,14 @@ export async function labStatus() {
       window: !!prefs.androidWindow,
       licenses: !!licensesDir(),
     },
+    vm: await vmStatus(),
   }
 }
 
 export async function labAction(action: string, labArg: unknown, value: unknown, emit: Emit): Promise<void> {
-  const lab = isLab(labArg) ? labArg : null
+  // Windows complet (machine virtuelle) : voir agent/winvm.ts
+  if (labArg === 'windows-vm' || action === 'windows-license' || action.startsWith('vm-')) return vmAction(action, value, emit)
+  const lab = isLab(labArg) && labArg !== 'windows-vm' ? labArg : null
   const need = () => {
     if (!lab) throw new Error('Labo inconnu')
     return lab
