@@ -1,12 +1,12 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { useEffect, useState } from 'react'
 import {
-  AppWindow, Camera, Check, ChevronDown, CloudSun, Code, Cpu, Download, Eye, FilePen, FileText, FlaskConical, FolderInput, FolderOpen, Globe, LoaderCircle, Search, ShieldCheck, Smartphone, Terminal, X,
+  AppWindow, Camera, Check, ChevronDown, CloudSun, Code, Cpu, Download, Eye, FilePen, FileText, FlaskConical, FolderInput, FolderOpen, Globe, LoaderCircle, Package, Search, ShieldCheck, Smartphone, Terminal, X,
   type LucideIcon,
 } from 'lucide-react'
 import { useStore, type ToolCall } from '../store'
 import { decideTool } from '../chat'
-import { LAB_LABELS, type LabId } from '../lib/lab'
+import { LAB_LABELS, labAction, type LabId } from '../lib/lab'
 import { useLabScreen } from '../lib/labScreen'
 import { Button } from './ui'
 
@@ -30,7 +30,17 @@ const META: Record<string, { label: string; icon: LucideIcon; detail: (a: Record
   lab_screenshot: { label: 'Labo · écran', icon: Camera, detail: (a) => (a.lab === 'android' ? 'téléphone virtuel' : a.lab === 'windows-vm' ? 'écran de Windows (VM)' : `écran virtuel ${labName(a)}`) },
   lab_copy_in: { label: 'Copier dans le labo', icon: FolderInput, detail: (a) => `${String(a.source ?? '')} → ${labName(a)}` },
   android_adb: { label: 'Téléphone virtuel', icon: Smartphone, detail: (a) => `adb ${String(a.args ?? a.command ?? '')}` },
+  build_exe: {
+    label: 'Compiler un .exe',
+    icon: Package,
+    detail: (a) =>
+      [EXE_LANG[String(a.language ?? '')] ?? String(a.language ?? ''), `${String(a.name || 'programme')}.exe`, String(a.arch || 'x64'), a.gui === true ? 'fenêtre' : '']
+        .filter(Boolean)
+        .join(' · '),
+  },
 }
+
+const EXE_LANG: Record<string, string> = { c: 'C', cpp: 'C++', csharp: 'C#', go: 'Go', rust: 'Rust', python: 'Python' }
 
 const isLabId = (x: string): x is LabId => x in LAB_LABELS
 function labName(a: Record<string, unknown>) {
@@ -89,6 +99,13 @@ export function ToolCallView({ call, msgId }: { call: ToolCall; msgId: string })
         <div className="tool-links">
           <Button small variant="ghost" icon={/\.(html?|svg)$/i.test(path) ? Eye : FileText} onClick={() => openPanel({ type: 'code', key: `${msgId}:tool:${call.id}` })}>
             {/\.(html?|svg)$/i.test(path) ? 'Aperçu' : 'Voir le fichier'}
+          </Button>
+        </div>
+      )}
+      {call.name === 'build_exe' && call.output?.startsWith('✓') && (
+        <div className="tool-links">
+          <Button small variant="ghost" icon={FolderOpen} onClick={() => void labAction('reveal', null, 'exe')} title="~/Lumen Labo/exe">
+            Ouvrir le dossier des .exe
           </Button>
         </div>
       )}

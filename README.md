@@ -115,33 +115,29 @@ Version installée (plus légère) : `npm run build && npm start` (http://127.0.
   - `web_fetch` : lecture d'une page (via Ollama, sinon par le pont local, qui refuse les adresses locales et privées).
   Il reçoit la date et l'heure, et cite ses sources. Les modèles restent locaux ; seules les recherches partent en ligne
   (l'interface l'indique : « Recherche web » au lieu de « Mode hors ligne »).
-- **Labos isolés Linux, Windows et Android** (bouton « Labo » dans la zone de saisie, ou Réglages → « Labos ») : le
+- **Labos isolés Linux et Android** (bouton « Labo » dans la zone de saisie, ou Réglages → « Labos ») : le
   modèle écrit, compile, lance et teste ses programmes dans des machines à part (conteneurs Docker), sans toucher à
   l'ordinateur ; seul le dossier `~/Lumen Labo/<labo>` est partagé. Outils `lab_run`, `lab_write_file`,
   `lab_read_file`, `lab_screenshot`, `lab_copy_in` (copie d'un projet de l'ordinateur, avec votre accord) et `android_adb`.
   - **Linux** : Ubuntu 26.04 LTS, Python, Node.js LTS (dernière, choisie à la construction), GCC, CMake, Git… ; le
     modèle est root (`apt-get`, `pip`, `npm`).
-  - **Windows** : Wine 11 (WineHQ, dernière version), MinGW-w64 (C/C++ → `.exe`), C# avec Wine Mono (`csc`),
-    PowerShell 7 ; `C:\labo` = dossier partagé. Ce n'est pas un vrai Windows ; sur Mac Apple (émulation Rosetta), seuls
-    les programmes 64 bits tournent et seule la bibliothèque de base de .NET se charge (pour du .NET complet, le labo
-    Linux installe `dotnet-sdk-10.0`).
   - **Android** : JDK 25, Gradle, SDK Android (dernière plateforme), commande `android create` de Google (projets passés
     au dernier Android Gradle Plugin) ; les applis sont testées sur un **téléphone virtuel** (émulateur Android de
     l'ordinateur, accéléré, appareil dédié « Lumen Labo » démarré tout seul) : installation, tapotements, saisie,
     captures d'écran, journaux.
   - Programmes graphiques : écran virtuel (captures, pilotage avec `xdotool`). Serveurs : les ports 8000–8004 d'un labo
-    s'ouvrent sur `127.0.0.1:18000+` (Linux), `19000+` (Windows), `20000+` (Android).
+    s'ouvrent sur `127.0.0.1:18000+` (Linux), `20000+` (Android).
   - Sécurité : conteneurs sans privilèges, mémoire / processeurs / processus limités, Internet coupable à chaud, `adb`
     limité à l'émulateur du labo et au dossier du labo.
-  - Chaque labo se prépare une fois (de 2 à 15 min ; Linux ≈ 1,7 Go, Windows ≈ 8 Go, Android ≈ 6 Go) et se met à jour d'un clic (« Mettre à jour » reconstruit avec les
+  - Chaque labo se prépare une fois (de 2 à 15 min ; Linux ≈ 1,7 Go, Android ≈ 6 Go) et se met à jour d'un clic (« Mettre à jour » reconstruit avec les
     dernières versions, vos fichiers restent). Prérequis : Docker (OrbStack ou Docker Desktop sur Mac, Docker Desktop sur
     Windows, Docker Engine sur Linux) ; téléphone virtuel : Android Studio.
   - **Écran du labo** (bouton « écran » en haut de la conversation) : l'écran du labo s'affiche **en direct à côté du
-    chat** (Windows complet, Linux, Windows Wine, téléphone Android). Vous voyez ce que fait le modèle et vous pouvez
+    chat** (Windows complet, Linux, téléphone Android). Vous voyez ce que fait le modèle et vous pouvez
     piloter vous-même : clic, clic droit, molette, clavier (⌘ = Ctrl sous Windows). Il s'ouvre tout seul quand le modèle
     travaille dans la machine Windows ou sur le téléphone.
 - **Windows complet** (labo `windows-vm`, Mac à processeur Apple) : un **vrai Windows 11 ARM64** en machine virtuelle,
-  pour ce que Wine ne sait pas faire (.NET complet, PowerShell, registre, services, programmes Windows récents).
+  pour exécuter et tester de vrais programmes Windows (.NET complet, PowerShell, registre, services, programmes Windows récents).
   - Moteur : QEMU (`brew install qemu`) avec l'hyperviseur du Mac (`-accel hvf`), machine `virt`, UEFI edk2 fourni avec
     QEMU, disque NVMe, réseau virtio. Sur ce Mac, Docker (OrbStack) n'offre pas `/dev/kvm` : un vrai Windows ne peut pas
     tourner en conteneur, d'où la machine virtuelle. Le contrôleur d'interruptions est le GICv3 émulé par QEMU avec ITS
@@ -174,6 +170,27 @@ Version installée (plus légère) : `npm run build && npm start` (http://127.0.
     8000–8004 sur `127.0.0.1:21000+`, SSH sur `127.0.0.1:21022` (clé `~/.lumen/windows-vm/id_ed25519`). Fichiers de la
     machine : `~/.lumen/windows-vm`. Affichage de base (écran du micrologiciel `ramfb`, pas de pilote graphique) :
     800 × 600.
+- **Compilateur .exe de l'agent** (outil `build_exe`, avec le Labo) : « fais-moi un .exe qui… » → le modèle écrit le
+  programme, `build_exe` le compile en exécutable Windows, **le teste dans Windows** et le dépose dans
+  `~/Lumen Labo/exe` (bouton « Ouvrir le dossier des .exe » sur la carte de l'outil).
+  - **C, C++, C#, Go, Rust** : compilation croisée dans le labo Linux (natif, rapide) par `lab/lumen-exe.sh` —
+    LLVM-MinGW (clang), Go, .NET (exécutable autonome en un seul fichier, console ou WinForms), Rust (`*-windows-gnullvm`).
+    Les compilateurs, toujours les **dernières versions publiées**, s'installent au premier besoin dans
+    `~/Lumen Labo/linux/.outils` et y restent (≈ 0,5 à 1 Go chacun).
+  - **Python** : PyInstaller (un seul .exe), qui ne fonctionne que sous Windows → dans la **machine Windows** (labo
+    « Windows complet ») : dernière version de Python, installée au premier besoin, dépendances de `requirements.txt`.
+    C et C++ peuvent aussi y être compilés (`where: "windows-vm"`, LLVM-MinGW natif).
+  - **x64** par défaut (tous les PC Windows) ou **ARM64** ; application **console** (sortie et code de sortie, arguments
+    et texte tapé au clavier) ou **à fenêtre** (`gui`, capture d'écran de la fenêtre).
+  - **Test** dans le vrai Windows 11 si le labo « Windows complet » est installé (x64 par l'émulation de Windows, ARM64
+    en natif) ; sinon le test est sauté (le labo « Windows complet » est requis). Le résultat donne l'architecture et le
+    type lus dans l'en-tête de l'exe, sa taille et son empreinte SHA-256 ; en cas d'échec, le modèle corrige et recompile.
+  - Mesuré sur Mac M5 : programme C compilé (clang 23) et testé dans Windows 11 en 25 s, installation de LLVM-MinGW
+    comprise.
+- **Reprendre au lieu de tout refaire** : « Régénérer », « Réessayer » (après une erreur) et « Relancer » (après un arrêt)
+  gardent les étapes d'agent déjà réussies (fichiers écrits, programmes compilés, commandes lancées) et ne refont que la
+  dernière : le modèle repart des résultats obtenus. Après une limite d'étapes, un arrêt ou un rechargement de la page,
+  « Continuer » reprend là où il en était ; « Tout recommencer » efface la réponse et repart de zéro.
 - **Conversation vocale façon Jarvis** (bouton « onde sonore » à côté d'Envoyer) : vous parlez, Lumen transcrit, le
   modèle répond et Lumen **lit sa réponse à voix haute pendant qu'elle s'écrit**, puis se remet à écouter. Dites « stop »
   ou appuyez sur Échap pour terminer ; Espace ou « Interrompre » coupe la parole. Les blocs de code ne sont pas lus
@@ -240,8 +257,9 @@ agent/
   bridge.ts            pont local de l'agent (outils, Ollama, diagnostic, usage)
   lab.ts               labos isolés : conteneurs Docker, téléphone virtuel Android, outils lab_* et android_adb, écran en direct
   winvm.ts             labo « Windows complet » : machine virtuelle Windows 11 ARM (QEMU, SSH, QMP)
+  exe.ts               compilateur .exe de l'agent (outil build_exe : compile, teste dans Windows, dépose l'exe)
   proc.ts              lancement de processus partagé par les labos
-lab/                   recettes des labos (linux, windows, android .Dockerfile) et « android create » à jour
+lab/                   recettes des labos (linux, android .Dockerfile), « android create » à jour, lumen-exe.sh
   windows-vm/          installation sans intervention de Windows 11 ARM (autounattend.xml, setup.ps1)
 ```
 

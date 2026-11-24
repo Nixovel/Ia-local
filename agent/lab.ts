@@ -3,7 +3,6 @@
  * Labos de Lumen : des machines isolées où l'agent écrit, compile, exécute et teste des programmes sans toucher à
  * l'ordinateur de l'utilisateur.
  *  - Linux : Ubuntu LTS avec Python, Node.js, GCC… (conteneur Docker) ;
- *  - Windows : programmes Windows via Wine, compilation .exe (MinGW-w64), PowerShell (conteneur x86-64) ;
  *  - Android : construction d'applications (JDK, Gradle, SDK Android, conteneur x86-64) et téléphone virtuel
  *    (émulateur Android de l'ordinateur, accéléré, avec un appareil dédié « Lumen_Labo »).
  *  - Windows complet (windows-vm) : vraie machine virtuelle Windows 11 ARM (QEMU + hyperviseur du Mac), pilotée
@@ -24,9 +23,9 @@ import { clip, exec, sleep, type Out } from './proc'
 import { parseScreenInput, VM_PORT_BASE, vmAction, vmInput, vmScreen, vmStatus, vmTool, type ScreenInput } from './winvm'
 export { parseScreenInput }
 
-export type DockerLab = 'linux' | 'windows' | 'android'
+export type DockerLab = 'linux' | 'android'
 export type LabId = DockerLab | 'windows-vm'
-export const DOCKER_LABS: DockerLab[] = ['linux', 'windows', 'android']
+export const DOCKER_LABS: DockerLab[] = ['linux', 'android']
 export const LAB_IDS: LabId[] = [...DOCKER_LABS, 'windows-vm']
 export const isLab = (x: unknown): x is LabId => LAB_IDS.includes(x as LabId)
 export type { ScreenInput }
@@ -41,9 +40,9 @@ const isWin = process.platform === 'win32'
 const LAB_DIR = fileURLToPath(new URL('../lab', import.meta.url))
 export const WORK_ROOT = path.join(os.homedir(), 'Lumen Labo')
 const PREFS_FILE = path.join(WORK_ROOT, '.lumen-labs.json')
-const LABEL: Record<LabId, string> = { linux: 'Linux', windows: 'Windows', android: 'Android', 'windows-vm': 'Windows (VM)' }
+const LABEL: Record<LabId, string> = { linux: 'Linux', android: 'Android', 'windows-vm': 'Windows (VM)' }
 /** Ports 8000 à 8004 du labo, publiés sur l'ordinateur (127.0.0.1 seulement). */
-export const PORT_BASE: Record<LabId, number> = { linux: 18000, windows: 19000, android: 20000, 'windows-vm': VM_PORT_BASE }
+export const PORT_BASE: Record<LabId, number> = { linux: 18000, android: 20000, 'windows-vm': VM_PORT_BASE }
 const ctr = (lab: DockerLab) => `lumen-lab-${lab}`
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 
@@ -234,7 +233,6 @@ async function create(lab: DockerLab, tag: string, emit: Emit) {
 
 const VERSION_CMD: Record<DockerLab, string> = {
   linux: String.raw`. /etc/os-release; printf '%s · Node.js %s · %s · GCC %s' "$PRETTY_NAME" "$(node -v)" "$(python3 -V)" "$(gcc -dumpfullversion)"`,
-  windows: String.raw`. /etc/os-release; printf '%s · PowerShell %s · MinGW-w64 GCC %s · %s' "$(wine --version)" "$(pwsh -NoProfile -c '$PSVersionTable.PSVersion.ToString()')" "$(x86_64-w64-mingw32-gcc -dumpfullversion)" "$PRETTY_NAME"`,
   android: String.raw`printf 'JDK %s · Gradle %s · SDK %s· build-tools %s' "$(java -version 2>&1 | head -1 | cut -d'"' -f2)" "$(cat /opt/gradle/VERSION 2>/dev/null)" "$(ls $ANDROID_HOME/platforms | tr '\n' ' ')" "$(ls $ANDROID_HOME/build-tools | tr '\n' ' ')"`,
 }
 
@@ -478,17 +476,10 @@ async function androidAdb(raw: string, emit: Emit): Promise<ToolResult> {
 }
 
 // ---------- Outils de l'agent ----------
-/** Chemin dans le labo : relatif à /workspace ; dans le labo Windows, « C:\labo\… » = /workspace/…, « C:\… » = disque C: de Wine. */
-function labPath(lab: DockerLab, p: string): string {
+/** Chemin dans le labo : relatif à /workspace ; « ~ » = /root. */
+function labPath(_lab: DockerLab, p: string): string {
   let x = (p || '').trim().replace(/^["']|["']$/g, '')
   if (!x || x === '.') return '/workspace'
-  if (lab === 'windows' && /^[a-z]:([\\/]|$)/i.test(x)) {
-    const drive = x[0].toLowerCase()
-    const rest = x.slice(2).replace(/\\/g, '/').replace(/^\/+/, '')
-    if (drive === 'c' && /^labo(\/|$)/i.test(rest)) return path.posix.join('/workspace', rest.slice(4))
-    return path.posix.join(drive === 'c' ? '/root/.wine/drive_c' : `/root/.wine/dosdevices/${drive}:`, rest)
-  }
-  if (lab === 'windows') x = x.replace(/\\/g, '/')
   if (x === '~' || x.startsWith('~/')) x = '/root' + x.slice(1)
   return x.startsWith('/') ? path.posix.normalize(x) : path.posix.join('/workspace', x)
 }
@@ -510,7 +501,7 @@ async function resizePng(buf: Buffer, max: number): Promise<Buffer> {
 }
 
 const isPng = (b: Buffer) => b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-/** Capture de l'écran virtuel (Xvfb :99) des labos Linux et Windows (Wine). */
+/** Capture de l'écran virtuel (Xvfb :99) du labo Linux. */
 const SCREEN_CMD = 'import -display :99 -window root png:- 2>/dev/null || magick import -display :99 -window root png:- 2>/dev/null || xwd -display :99 -root -silent | convert xwd:- png:-'
 
 // ---------- Écran en direct (panneau « Écran du labo » de Lumen) ----------
@@ -720,7 +711,8 @@ export async function labAction(action: string, labArg: unknown, value: unknown,
       return
     }
     case 'reveal': {
-      const dir = lab ? path.join(WORK_ROOT, lab) : WORK_ROOT
+      // « exe » : les programmes Windows fabriqués par l'outil build_exe
+      const dir = lab ? path.join(WORK_ROOT, lab) : value === 'exe' ? path.join(WORK_ROOT, 'exe') : WORK_ROOT
       await fs.mkdir(dir, { recursive: true })
       if (isMac) await exec('open', [dir])
       else if (isWin) await exec('explorer.exe', [dir])

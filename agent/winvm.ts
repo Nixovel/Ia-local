@@ -1,7 +1,7 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 /**
  * Labo « Windows complet » (windows-vm) : une vraie machine virtuelle Windows 11 ARM sur Mac à processeur Apple,
- * avec QEMU et l'hyperviseur de macOS (« -accel hvf »), en complément du labo Windows simulé par Wine.
+ * avec QEMU et l'hyperviseur de macOS (« -accel hvf »). C'est le seul labo Windows de Lumen.
  *  - Installation sans intervention depuis l'ISO officielle de Microsoft (téléchargée par l'utilisateur) : pilotes
  *    virtio ARM64 (Red Hat), autounattend.xml, compte local « lumen », OpenSSH Server, PowerShell 7, LLVM-MinGW
  *    (voir lab/windows-vm). La licence de Windows n'est acceptée qu'après l'accord de l'utilisateur dans Lumen.
@@ -755,6 +755,16 @@ function hostMirror(p: string): string | null {
   const m = p.match(/^c:\\labo(?:\\(.*))?$/i)
   if (!m) return null
   return path.join(WORK, ...(m[1] ?? '').split('\\').filter((s) => s && s !== '..'))
+}
+
+/** Copie un fichier ou un dossier de la machine (C:\labo…) vers l'ordinateur (compilateur .exe de l'agent). */
+export async function vmCopyOut(src: string, dest: string): Promise<{ ok: boolean; output: string }> {
+  await ensureVm()
+  await fs.mkdir(path.dirname(dest), { recursive: true })
+  const r = await exec('scp', ['-r', '-q', ...sshArgs().map((x) => (x === '-p' ? '-P' : x)), `${USER}@127.0.0.1:${winPath(src).replace(/\\/g, '/')}`, dest], {
+    timeout: 15 * 60_000,
+  })
+  return { ok: r.code === 0, output: r.out.trim() }
 }
 
 function decodeText(b: Buffer): string | null {

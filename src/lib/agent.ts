@@ -5,7 +5,7 @@ import type { OllamaTool } from './ollama'
 export type ToolName =
   | 'set_working_dir' | 'run_command' | 'read_file' | 'write_file' | 'list_dir' | 'open' | 'screenshot' | 'applescript'
   | 'system_info' | 'install_model' | 'web_search' | 'web_fetch' | 'weather'
-  | 'lab_run' | 'lab_write_file' | 'lab_read_file' | 'lab_screenshot' | 'lab_copy_in' | 'android_adb'
+  | 'lab_run' | 'lab_write_file' | 'lab_read_file' | 'lab_screenshot' | 'lab_copy_in' | 'android_adb' | 'build_exe'
 export type ToolResult = { ok: boolean; output: string; image?: string; cwd?: string }
 export type AgentInfo = { token: string; home: string; platform: string; arch?: string; shell: string }
 
@@ -62,29 +62,29 @@ export const WEB_TOOLS: OllamaTool[] = [
 ]
 export const WEB_TOOL_NAMES = new Set<string>(WEB_TOOLS.map((t) => t.function.name))
 
-/** Labos isolés (option « Labo ») : Linux, Windows (Wine), Windows complet (VM) et Android, sans risque pour l'ordinateur. */
+/** Labos isolés (option « Labo ») : Linux, Windows complet (VM) et Android, sans risque pour l'ordinateur. */
 const LAB: Param = {
   type: 'string',
-  description: 'Le labo : « linux », « windows » (Wine), « windows-vm » (vrai Windows 11, PowerShell) ou « android »',
-  enum: ['linux', 'windows', 'windows-vm', 'android'],
+  description: 'Le labo : « linux », « windows-vm » (vrai Windows 11, PowerShell) ou « android »',
+  enum: ['linux', 'windows-vm', 'android'],
 }
 export const LAB_TOOLS: OllamaTool[] = [
-  fn('lab_run', "Exécute une commande dans un labo isolé pour installer, compiler, lancer et tester des programmes sans risque pour l'ordinateur : bash (linux, windows, android) ou PowerShell (windows-vm, vrai Windows 11). Renvoie la sortie et le code de sortie.", {
+  fn('lab_run', "Exécute une commande dans un labo isolé pour installer, compiler, lancer et tester des programmes sans risque pour l'ordinateur : bash (linux, android) ou PowerShell (windows-vm, vrai Windows 11). Renvoie la sortie et le code de sortie.", {
     lab: LAB,
-    command: { type: 'string', description: 'La commande : bash, ex. « python3 app.py », « gcc main.c -o main && ./main », « wine prog.exe », « ./gradlew assembleDebug » ; PowerShell pour windows-vm, ex. « clang hello.c -o hello.exe; .\\hello.exe »' },
+    command: { type: 'string', description: 'La commande : bash, ex. « python3 app.py », « gcc main.c -o main && ./main », « ./gradlew assembleDebug » ; PowerShell pour windows-vm, ex. « clang hello.c -o hello.exe; .\\hello.exe »' },
     cwd: { type: 'string', description: 'Dossier dans le labo (optionnel : /workspace par défaut, C:\\labo pour windows-vm)' },
     timeout: { type: 'number', description: 'Durée maximale en secondes (optionnel, 300 par défaut, 900 pour android)' },
   }, ['lab', 'command']),
   fn('lab_write_file', "Crée ou remplace un fichier dans un labo (chemin relatif = /workspace, ou C:\\labo pour windows-vm ; les dossiers manquants sont créés). Écris le fichier complet.", {
     lab: LAB,
-    path: { type: 'string', description: 'Chemin du fichier, ex. « projet/main.py » (windows et windows-vm : aussi « C:\\labo\\prog.c »)' },
+    path: { type: 'string', description: 'Chemin du fichier, ex. « projet/main.py » (windows-vm : aussi « C:\\labo\\prog.c »)' },
     content: { type: 'string', description: 'Contenu complet du fichier' },
   }, ['lab', 'path', 'content']),
   fn('lab_read_file', "Lit un fichier texte d'un labo (ou liste le contenu d'un dossier).", {
     lab: LAB,
     path: { type: 'string', description: 'Chemin du fichier ou du dossier (relatif = /workspace, ou C:\\labo pour windows-vm)' },
   }, ['lab', 'path']),
-  fn('lab_screenshot', "Capture l'écran d'un labo pour voir un programme graphique : bureau de Windows (windows-vm), écran virtuel Linux ou Windows (Wine), ou écran du téléphone virtuel Android.", {
+  fn('lab_screenshot', "Capture l'écran d'un labo pour voir un programme graphique : bureau de Windows (windows-vm), écran virtuel Linux, ou écran du téléphone virtuel Android.", {
     lab: LAB,
   }, ['lab']),
   fn('lab_copy_in', "Copie un fichier ou un dossier de l'ordinateur de l'utilisateur dans un labo, pour le tester.", {
@@ -95,6 +95,20 @@ export const LAB_TOOLS: OllamaTool[] = [
   fn('android_adb', "Pilote le téléphone virtuel Android du labo (démarré automatiquement) avec une commande adb : install, uninstall, shell, logcat, push, pull. Chemins de fichiers relatifs = /workspace du labo android.", {
     args: { type: 'string', description: "Arguments d'adb, ex. « install -r MonApp/app/build/outputs/apk/debug/app-debug.apk », « shell monkey -p com.exemple.monapp 1 », « shell input tap 540 1200 », « logcat -d -t 200 »" },
   }, ['args']),
+  fn('build_exe', "Compile un programme en exécutable Windows (.exe), le teste dans le vrai Windows 11 (labo « Windows complet », s'il est installé) et le dépose dans « ~/Lumen Labo/exe ». Langages : C, C++, C#, Go, Rust, Python. Les compilateurs (dernières versions) s'installent tout seuls.", {
+    language: { type: 'string', description: 'Le langage', enum: ['c', 'cpp', 'csharp', 'go', 'rust', 'python'] },
+    code: { type: 'string', description: 'Le code complet d’un programme en un seul fichier (sinon, utilise « source »)' },
+    source: { type: 'string', description: 'Fichier ou dossier du projet dans un labo, ex. « projet » ou « /workspace/projet » (labo « from »)' },
+    from: { type: 'string', description: 'Labo où se trouve « source » (linux par défaut)', enum: ['linux', 'windows-vm', 'android'] },
+    name: { type: 'string', description: 'Nom de l’exe, sans « .exe » (ex. « calculatrice »)' },
+    arch: { type: 'string', description: 'x64 (par défaut : tous les PC Windows) ou arm64', enum: ['x64', 'arm64'] },
+    gui: { type: 'boolean', description: 'true SEULEMENT pour une vraie application à fenêtre (WinMain/CreateWindow, WinForms, tkinter…). Un programme qui affiche du texte (printf, print, Console.WriteLine) : false (par défaut)' },
+    where: { type: 'string', description: 'Où compiler : auto (labo Linux ; Python : Windows VM) ou windows-vm (C/C++ compilés dans le vrai Windows)', enum: ['auto', 'windows-vm'] },
+    test: { type: 'string', description: 'Test après compilation : auto (par défaut), vm ou none', enum: ['auto', 'vm', 'none'] },
+    args: { type: 'string', description: 'Arguments de la ligne de commande pour le test (optionnel)' },
+    input: { type: 'string', description: 'Texte envoyé au programme pendant le test, comme s’il était tapé au clavier (optionnel)' },
+    entry: { type: 'string', description: 'Python : fichier principal (optionnel, main.py par défaut)' },
+  }, []),
 ]
 export const LAB_TOOL_NAMES = new Set<string>(LAB_TOOLS.map((t) => t.function.name))
 
@@ -214,12 +228,12 @@ export function labSystemPrompt(arch?: string): string {
   return [
     "Tu disposes de labos isolés pour écrire, compiler, exécuter et tester des programmes sans risque pour l'ordinateur de l'utilisateur (outils lab_* et android_adb). Dès qu'il faut exécuter ou tester du code, fais-le dans un labo au lieu de seulement l'écrire.",
     `- « linux » : Ubuntu 26.04 LTS (${cpu}), tu es root. Python 3, pip, Node.js LTS, npm, gcc/g++, make, cmake, gdb, git, curl, sqlite3. Installe le reste toi-même : « apt-get update && apt-get install -y … » (ex. dotnet-sdk-10.0, golang, rustc, openjdk-25-jdk), « pip install … », « npm install -g … ».`,
-    `- « windows » : Windows simulé par Wine (64 bits). Lance un programme : « wine prog.exe » ; invite de commandes : « cmd dir », « cmd script.bat » ; PowerShell : « pwsh -c '…' » ; compile en .exe : « x86_64-w64-mingw32-gcc prog.c -o prog.exe » (C++ : x86_64-w64-mingw32-g++ -static). C:\\labo = /workspace. C# : « csc Prog.cs » puis « wine Prog.exe » (Wine Mono). Ce n'est pas un vrai Windows : pilotes, anti-triche ou programmes très récents peuvent ne pas marcher.${arch === 'arm64' ? " Sur ce Mac à processeur Apple, seuls les programmes Windows 64 bits fonctionnent (compile toujours en 64 bits) et seule la bibliothèque de base de .NET se charge : pour du C# / .NET complet, utilise le labo linux (« apt-get install -y dotnet-sdk-10.0 », puis « dotnet new console -o App && cd App && dotnet run »)." : ''}`,
-    `- « windows-vm » : un VRAI Windows 11 ARM64 (machine virtuelle${arch === 'arm64' ? ' accélérée par le Mac' : ''}), à utiliser quand Wine ne suffit pas (.NET complet, pilotes, programmes Windows récents, PowerShell, registre, services). Disponible s'il a été installé (Réglages → Labos → Windows complet), sinon l'outil le dit : utilise alors « windows ». lab_run y exécute du PowerShell 7 (pas bash) en administrateur, dans C:\\labo par défaut (relatif = C:\\labo ; « cmd /c … » pour l'invite de commandes). Compile en C/C++ avec LLVM-MinGW : « clang hello.c -o hello.exe » (ARM64 natif), « x86_64-w64-mingw32-clang hello.c -o hello-x64.exe » (x64, lancé par l'émulation de Windows 11), puis « .\\hello.exe ». Installe le reste avec winget (« winget install --id Python.Python.3.13 -e --accept-source-agreements --accept-package-agreements ») ou .NET (« Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile d.ps1; ./d.ps1 -Channel LTS »). Programme graphique : « lumen-gui C:\\labo\\app.exe » (il s'ouvre sur le bureau de Windows), attends (« Start-Sleep 3 »), puis lab_screenshot (lab « windows-vm »). L'utilisateur voit cet écran en direct à côté du chat. Serveurs : ports 8000 à 8004 → http://127.0.0.1:21000 à 21004 sur l'ordinateur.`,
+    `- « windows-vm » : un VRAI Windows 11 ARM64 (machine virtuelle${arch === 'arm64' ? ' accélérée par le Mac' : ''}) : .NET complet, pilotes, programmes Windows récents, PowerShell, registre, services. Disponible s'il a été installé (Réglages → Labos → Windows complet), sinon l'outil le dit. lab_run y exécute du PowerShell 7 (pas bash) en administrateur, dans C:\\labo par défaut (relatif = C:\\labo ; « cmd /c … » pour l'invite de commandes). Compile en C/C++ avec LLVM-MinGW : « clang hello.c -o hello.exe » (ARM64 natif), « x86_64-w64-mingw32-clang hello.c -o hello-x64.exe » (x64, lancé par l'émulation de Windows 11), puis « .\\hello.exe ». Installe le reste avec winget (« winget install --id Python.Python.3.13 -e --accept-source-agreements --accept-package-agreements ») ou .NET (« Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile d.ps1; ./d.ps1 -Channel LTS »). Pour du C# / .NET complet tu peux aussi utiliser le labo linux (« apt-get install -y dotnet-sdk-10.0 », puis « dotnet new console -o App && cd App && dotnet run »). Programme graphique : « lumen-gui C:\\labo\\app.exe » (il s'ouvre sur le bureau de Windows), attends (« Start-Sleep 3 »), puis lab_screenshot (lab « windows-vm »). L'utilisateur voit cet écran en direct à côté du chat. Serveurs : ports 8000 à 8004 → http://127.0.0.1:21000 à 21004 sur l'ordinateur.`,
     "- « android » : construit des applis Android (JDK 25, Gradle, SDK Android). Nouveau projet : « android create empty-activity --name \"Mon App\" --application-id com.exemple.monapp -o MonApp », puis « cd MonApp && ./gradlew assembleDebug » (APK : MonApp/app/build/outputs/apk/debug/app-debug.apk). Teste sur le téléphone virtuel avec android_adb : « install -r MonApp/app/build/outputs/apk/debug/app-debug.apk », « shell monkey -p com.exemple.monapp 1 » (lance l'appli), « shell input tap X Y », « shell input text Bonjour », « shell uiautomator dump /sdcard/ui.xml » puis « shell cat /sdcard/ui.xml » (boutons et coordonnées), « logcat -d -t 200 » (erreurs). Regarde l'écran avec lab_screenshot (lab « android »).",
+    "- Programme Windows (.exe) demandé : utilise build_exe (C, C++, C#, Go, Rust, Python), avec le code complet dans « code » (ou un projet du labo dans « source »), un nom et gui=true pour une fenêtre. Il compile avec les derniers compilateurs, teste l'exe dans le vrai Windows 11 (labo « Windows complet », s'il est installé ; capture d'écran pour une fenêtre) et le dépose dans « ~/Lumen Labo/exe » : lis le résultat du test, corrige et recompile si besoin, puis donne le chemin de l'exe à l'utilisateur. x64 par défaut (tous les PC) ; arm64 sur demande.",
     "- Fichiers : lab_write_file / lab_read_file (chemins relatifs = /workspace). /workspace est le dossier « ~/Lumen Labo/<labo> » de l'utilisateur : il y retrouve tes fichiers (windows-vm : C:\\labo, dont les fichiers que tu écris sont copiés dans « ~/Lumen Labo/windows-vm »). Pour tester un projet de l'ordinateur, copie-le d'abord avec lab_copy_in.",
-    "- Programmes graphiques (Linux, Windows) : lance-les en arrière-plan (« nohup python3 app.py > /tmp/app.log 2>&1 & » ou « nohup wine prog.exe > /tmp/prog.log 2>&1 & »), attends (« sleep 3 »), puis lab_screenshot ; clique et tape avec xdotool (« xdotool mousemove 400 300 click 1 », « xdotool type 'texte' »).",
-    "- Serveurs : lance-les en arrière-plan avec nohup, sur 0.0.0.0 et un port de 8000 à 8004 ; l'utilisateur les ouvre à http://127.0.0.1:18000 à 18004 (labo windows : 19000 à 19004, android : 20000 à 20004).",
+    "- Programmes graphiques (labo Linux) : lance-les en arrière-plan (« nohup python3 app.py > /tmp/app.log 2>&1 & »), attends (« sleep 3 »), puis lab_screenshot ; clique et tape avec xdotool (« xdotool mousemove 400 300 click 1 », « xdotool type 'texte' »).",
+    "- Serveurs : lance-les en arrière-plan avec nohup, sur 0.0.0.0 et un port de 8000 à 8004 ; l'utilisateur les ouvre à http://127.0.0.1:18000 à 18004 (android : 20000 à 20004 ; Windows complet : 21000 à 21004).",
     "- Une commande qui attend une saisie au clavier bloque : donne l'entrée (« echo 5 | ./prog ») ou des arguments.",
     "- Le premier usage d'un labo peut prendre quelques minutes (préparation). Teste vraiment : exécute, lis les erreurs, corrige et relance jusqu'à ce que ça marche, puis résume ce que tu as testé et le résultat.",
   ].join('\n')

@@ -1,6 +1,6 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 // Panneau « Écran du labo », à côté du chat : l'écran d'un labo en direct (ce que le modèle voit et fait), que
-// l'utilisateur peut aussi piloter (clic, clic droit, molette, clavier). Windows (VM), Linux, Windows (Wine), Android.
+// l'utilisateur peut aussi piloter (clic, clic droit, molette, clavier). Windows (VM), Linux, Android.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from 'react'
 import { Keyboard, LoaderCircle, Monitor, MousePointerClick, Play, X } from 'lucide-react'
 import { toast } from '../store'
@@ -8,7 +8,7 @@ import { useLabScreen } from '../lib/labScreen'
 import { LAB_LABELS, labAction, labInput, labScreen, labStatus, progressLabel, type LabEvent, type LabId, type LabStatus, type ScreenInput } from '../lib/lab'
 import { Button, IconButton } from './ui'
 
-const ORDER: LabId[] = ['windows-vm', 'linux', 'windows', 'android']
+const ORDER: LabId[] = ['windows-vm', 'linux', 'android']
 const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'Fn'])
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 

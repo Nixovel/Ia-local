@@ -218,7 +218,7 @@ function Topbar({ conv, files, images }: { conv: Conversation; files: CodeFile[]
       {last && (
         <span className="pill" title="Contexte utilisé par le dernier échange">
           <Gauge size={12} className="muted" />
-          {compact(last.promptCount + last.evalCount)} / {formatCtx(numCtx)} ctx
+          {compact(last.promptCount + last.evalCount)} / {formatCtx(last.ctx ?? numCtx)} ctx
         </span>
       )}
       <IconButton icon={Share} label="Exporter la conversation (.md)" onClick={exportMd} />

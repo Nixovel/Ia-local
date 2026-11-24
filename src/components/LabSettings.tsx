@@ -1,8 +1,8 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
-// Réglages → Labos : machines isolées (Linux, Windows, Android, Windows complet) où les modèles testent leurs programmes.
+// Réglages → Labos : machines isolées (Linux, Android, Windows complet) où les modèles testent leurs programmes.
 import { useCallback, useEffect, useState } from 'react'
 import {
-  AppWindow, Check, ExternalLink, FileSearch, FolderOpen, Globe, LoaderCircle, Monitor, Play, Power, RefreshCw, RotateCcw, Smartphone, Square, Terminal, Trash2,
+  Check, ExternalLink, FileSearch, FolderOpen, Globe, LoaderCircle, Monitor, Play, Power, RefreshCw, RotateCcw, Smartphone, Square, Terminal, Trash2,
   type LucideIcon,
 } from 'lucide-react'
 import { toast, useStore } from '../store'
@@ -12,7 +12,6 @@ import { Button, IconButton, StatusDot } from './ui'
 
 const META: Record<DockerLabId, { name: string; icon: LucideIcon; desc: string; size: string }> = {
   linux: { name: 'Linux', icon: Terminal, desc: 'Ubuntu LTS · Python, Node.js, GCC, Git…', size: '≈ 1,7 Go' },
-  windows: { name: 'Windows', icon: AppWindow, desc: 'Wine · .exe, compilation MinGW, C#, PowerShell', size: '≈ 8 Go' },
   android: { name: 'Android', icon: Smartphone, desc: 'JDK, Gradle, SDK Android + téléphone virtuel', size: '≈ 6 Go' },
 }
 
@@ -76,7 +75,7 @@ export function LabSettings() {
         <span className="toggle-text">
           <span className="label-sm">Laisser les modèles tester leurs programmes dans les labos</span>
           <span className="caption muted">
-            Machines Linux, Windows et Android isolées : le modèle y installe, compile, lance et teste ce qu'il écrit, sans toucher à
+            Machines Linux et Android isolées : le modèle y installe, compile, lance et teste ce qu'il écrit, sans toucher à
             votre ordinateur. Seul le dossier « Lumen Labo » est partagé. Aussi activable avec le bouton « Labo ».
           </span>
         </span>
@@ -246,7 +245,7 @@ export function LabSettings() {
 
           <div className="field-row">
             <span className="caption muted">
-              Dossier partagé : {st.root}. Un serveur lancé dans un labo s'ouvre sur 127.0.0.1 (ports 18000+ Linux, 19000+ Windows, 20000+ Android, 21000+ Windows complet).
+              Dossier partagé : {st.root}. Un serveur lancé dans un labo s'ouvre sur 127.0.0.1 (ports 18000+ Linux, 20000+ Android, 21000+ Windows complet).
             </span>
             <span className="spacer" />
             <Button small variant="ghost" icon={FolderOpen} onClick={() => void act('root:reveal', 'reveal')}>

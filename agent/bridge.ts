@@ -20,6 +20,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isLab, LAB_TOOL_NAMES, labAction, labInput, labScreen, labStatus, labTool, parseScreenInput } from './lab'
+import { buildExe } from './exe'
 
 const TOKEN = randomBytes(24).toString('hex')
 const MAX_OUT = 20_000
@@ -288,7 +289,8 @@ async function runTool(name: string, a: Record<string, unknown>, cwd: string): P
     case 'fetch_url':
       return fetchUrl(str('url'))
     default:
-      // Labos isolés (Linux, Windows, Android) : voir agent/lab.ts
+      // Compilateur .exe (agent/exe.ts) et labos isolés (agent/lab.ts)
+      if (name === 'build_exe') return buildExe(a)
       if (LAB_TOOL_NAMES.has(name)) return labTool(name, a, cwd)
       return { ok: false, output: `Outil inconnu : ${name}` }
   }

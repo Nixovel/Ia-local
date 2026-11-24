@@ -1,6 +1,6 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { memo, useEffect, useRef, useState } from 'react'
-import { ArrowLeftRight, Brain, Check, ChevronDown, Copy, Download, ExternalLink, FastForward, FileCode, LoaderCircle, RefreshCw, Square, TriangleExclamationPoint, Volume2 } from 'lucide-react'
+import { ArrowLeftRight, Brain, Check, ChevronDown, Copy, Download, ExternalLink, FastForward, FileCode, LoaderCircle, Play, RefreshCw, RotateCcw, Square, TriangleExclamationPoint, Volume2 } from 'lucide-react'
 import { useStore, type Message } from '../store'
 import { answerWithoutThinking, regenerate } from '../chat'
 import { formatBytes, formatSeconds, formatTime, fr, compact } from '../lib/format'
@@ -62,7 +62,18 @@ function UserMessage({ msg }: Props) {
   )
 }
 
+const RESUME_HINT = "Reprend là où il s'est arrêté : les étapes déjà réussies (fichiers, compilations, commandes) sont gardées"
+
+function RestartButton({ convId }: { convId: string }) {
+  return (
+    <Button small variant="ghost" icon={RotateCcw} onClick={() => void regenerate(convId, { restart: true })} title="Efface toute la réponse et refait toutes les étapes depuis le début">
+      Tout recommencer
+    </Button>
+  )
+}
+
 function AssistantMessage({ msg, convId, files, isLast }: Props) {
+  const busy = useStore((s) => !!s.streaming[convId])
   const running = useStore((s) => s.runtime.running)
   const panel = useStore((s) => s.panel)
   const openPanel = useStore((s) => s.openPanel)
@@ -137,10 +148,11 @@ function AssistantMessage({ msg, convId, files, isLast }: Props) {
         <div className="msg-stopped">
           <span className="caption muted">Génération interrompue.</span>
           {isLast && (
-            <Button small variant="ghost" icon={RefreshCw} onClick={() => void regenerate(convId)}>
-              Relancer
+            <Button small variant="ghost" icon={RefreshCw} onClick={() => void regenerate(convId)} title={RESUME_HINT}>
+              {msg.agentStep ? 'Reprendre' : 'Relancer'}
             </Button>
           )}
+          {isLast && msg.agentStep && <RestartButton convId={convId} />}
         </div>
       )}
       {msg.error && (
@@ -148,10 +160,21 @@ function AssistantMessage({ msg, convId, files, isLast }: Props) {
           <TriangleExclamationPoint size={15} />
           <span>{msg.error}</span>
           {isLast && (
-            <Button small variant="secondary" icon={RefreshCw} onClick={() => void regenerate(convId)}>
-              Réessayer
+            <Button small variant="secondary" icon={RefreshCw} onClick={() => void regenerate(convId)} title={RESUME_HINT}>
+              {msg.agentStep ? 'Reprendre' : 'Réessayer'}
             </Button>
           )}
+          {isLast && msg.agentStep && <RestartButton convId={convId} />}
+        </div>
+      )}
+      {/* L'agent s'est arrêté après des outils réussis (limite d'étapes, arrêt…) : il peut continuer là où il en était */}
+      {isLast && !busy && !msg.error && !msg.stopped && !!msg.toolCalls?.length && (
+        <div className="msg-stopped">
+          <span className="caption muted">L'agent s'est arrêté ici.</span>
+          <Button small variant="ghost" icon={Play} onClick={() => void regenerate(convId)} title={RESUME_HINT}>
+            Continuer
+          </Button>
+          <RestartButton convId={convId} />
         </div>
       )}
 
@@ -193,7 +216,16 @@ function AssistantMessage({ msg, convId, files, isLast }: Props) {
               onClick={() => void readAloud(msg.id, msg.content)}
             />
           )}
-          {isLast && <IconButton icon={RefreshCw} label="Régénérer avec le modèle sélectionné" onClick={() => void regenerate(convId)} />}
+          {isLast && (
+            <IconButton
+              icon={RefreshCw}
+              label={msg.agentStep ? 'Régénérer la réponse finale (le travail déjà fait est gardé)' : 'Régénérer avec le modèle sélectionné'}
+              onClick={() => void regenerate(convId)}
+            />
+          )}
+          {isLast && msg.agentStep && (
+            <IconButton icon={RotateCcw} label="Tout recommencer (refait toutes les étapes depuis le début)" onClick={() => void regenerate(convId, { restart: true })} />
+          )}
           <IconButton icon={Download} label="Télécharger la réponse (.md)" onClick={() => downloadText(msg.content, `reponse-${msg.id.slice(0, 6)}.md`, 'text/markdown')} />
           <span className="spacer" />
           {msg.stats && (

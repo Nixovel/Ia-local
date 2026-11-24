@@ -1,7 +1,7 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { thinkModeOf, toast, useStore, type Attachment, type Conversation, type Message, type Stats, type ToolCall } from './store'
 import { ollama, type ApiMessage, type ApiToolCall, type ModelInfo } from './lib/ollama'
-import { isChatModel, prettyName, supportsThinking, supportsTools, supportsVision } from './lib/models'
+import { formatCtx, isChatModel, prettyName, supportsThinking, supportsTools, supportsVision } from './lib/models'
 import {
   agentInfo, agentSystemPrompt, callTool, CLIENT_TOOLS, LAB_TOOL_NAMES, LAB_TOOLS, labSystemPrompt, needsApproval, parseTextToolCalls, TOOL_NAMES, TOOLS, WEB_TOOL_NAMES, WEB_TOOLS, webSystemPrompt,
   type ToolResult,
@@ -84,19 +84,74 @@ function makeTitle(text: string, atts: Attachment[]): string {
   return 'Nouvelle conversation'
 }
 
-/** Estimation grossière du nombre de tokens (≈ 3,5 caractères par token, ~800 par image). */
-function estimateTokens(msgs: Message[], summaryText?: string): number {
-  let chars = summaryText?.length ?? 0
-  let images = 0
-  for (const m of msgs) {
-    chars += m.content.length
-    for (const a of m.attachments ?? []) {
-      if (a.kind === 'file') chars += a.text?.length ?? 0
-      else images++
-    }
-    for (const t of m.toolCalls ?? []) chars += (t.output?.length ?? 0) + JSON.stringify(t.args).length
+/**
+ * Jetons estimés d'un texte. Un chiffre ou un retour à la ligne coûte ~1 jeton (Qwen découpe les nombres chiffre par
+ * chiffre), un symbole ~2/3, le reste ~1/3,5. Mesuré sur Ollama (2026-11-24) : sortie de `seq` 100 %, texte et code
+ * 111–121 %, sortie de `ls -la` 85 % — alors que « 3 caractères par jeton » ne comptait que 33 % d'une sortie chiffrée.
+ */
+function tokensOf(s: string): number {
+  let digits = 0
+  let newlines = 0
+  let symbols = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c >= 48 && c <= 57) digits++
+    else if (c === 10) newlines++
+    else if (c < 128 && c !== 32 && !((c | 32) >= 97 && (c | 32) <= 122)) symbols++
   }
-  return chars / 3.5 + images * 800
+  return digits + newlines + symbols / 1.5 + (s.length - digits - newlines - symbols) / 3.5
+}
+
+/** Taille estimée de messages enregistrés (~800 jetons par image). */
+function estimateTokens(msgs: Message[], summaryText?: string): number {
+  let tokens = tokensOf(summaryText ?? '')
+  for (const m of msgs) {
+    tokens += tokensOf(m.content)
+    for (const a of m.attachments ?? []) tokens += a.kind === 'file' ? tokensOf(a.text ?? '') : 800
+    for (const t of m.toolCalls ?? []) tokens += tokensOf(t.output ?? '') + tokensOf(JSON.stringify(t.args))
+  }
+  return tokens
+}
+
+/** Mémoire minimale quand le modèle a des outils : consignes de l'agent et définitions des outils pèsent déjà ≈ 3 700 jetons. */
+const TOOLS_MIN_CTX = 16384
+/** Part de la mémoire gardée libre pour la réponse : un fichier écrit par un outil (lab_write_file…) passe tout entier dans l'appel. */
+const ANSWER_RESERVE = 0.3
+
+/** Mémoire (contexte) réellement utilisée : jamais moins de 16 K avec des outils, sauf sur les petites machines. */
+function contextFor(numCtx: number, withTools: boolean, info: ModelInfo | undefined, lowMemory: boolean): number {
+  if (!withTools || lowMemory) return numCtx
+  return Math.max(numCtx, Math.min(TOOLS_MIN_CTX, info?.details?.context_length || TOOLS_MIN_CTX))
+}
+
+/** Taille estimée de la requête complète (consignes, définitions d'outils, historique), en jetons. */
+function estimateRequest(history: ApiMessage[], tools: unknown[]): number {
+  let tokens = tools.length ? tokensOf(JSON.stringify(tools)) : 0
+  for (const m of history)
+    tokens += tokensOf(m.content) + (m.tool_calls ? tokensOf(JSON.stringify(m.tool_calls)) : 0) + (m.images?.length ?? 0) * 800
+  return tokens
+}
+
+/**
+ * Mémoire du modèle pleine : Ollama refuse la requête (« exceeds the available context size »), ou la coupe pendant
+ * que le modèle écrit un appel d'outil, qui arrive alors en JSON incomplet (« unexpected end of JSON input »).
+ */
+const isContextFull = (e: unknown) =>
+  /invalid tool call arguments|unexpected end of JSON|exceeds the available context size/i.test((e as Error)?.message ?? '')
+
+/** Raccourcit un long texte en gardant le début et la fin. */
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text
+  const head = Math.floor(max * 0.4)
+  return `${text.slice(0, head)}\n[… ${text.length - max} caractères omis pour tenir dans la mémoire du modèle …]\n${text.slice(-(max - head))}`
+}
+
+/** Arguments d'un ancien appel d'outil, allégés : un contenu déjà écrit n'a pas besoin d'être renvoyé en entier. */
+function lightArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(args))
+    out[k] = typeof v === 'string' && v.length > 600 ? `${v.slice(0, 200)}\n[… suite déjà envoyée (${v.length} caractères au total) : relire le fichier pour la voir]` : v
+  return out
 }
 
 /** Résume des messages (et un éventuel résumé précédent) pour qu'un autre modèle puisse reprendre le fil. */
@@ -145,13 +200,23 @@ async function summarize(
   return out.trim()
 }
 
-function buildMessages(msgs: Message[], system: string, vision: boolean, summary?: Conversation['summary']): ApiMessage[] {
+/**
+ * `compact` allège l'historique quand la mémoire du modèle déborde :
+ * 1 = longues sorties d'outils des étapes passées raccourcies ; 2 = en plus, contenus déjà écrits par les outils réduits
+ * à leur début ; 3 = en dernier recours, la dernière étape aussi (sortie gardée plus longue : le modèle en a besoin).
+ */
+function buildMessages(msgs: Message[], system: string, vision: boolean, summary?: Conversation['summary'], compact = 0): ApiMessage[] {
   const out: ApiMessage[] = []
   // Avec un résumé, les messages qu'il couvre sont remplacés par lui.
   const cut = summary ? msgs.findIndex((m) => m.id === summary.uptoId) : -1
   const sys = [system.trim(), cut >= 0 && summary ? `Résumé de la conversation jusqu'ici :\n${summary.text}` : ''].filter(Boolean).join('\n\n')
   if (sys) out.push({ role: 'system', content: sys })
-  for (const m of cut >= 0 ? msgs.slice(cut + 1) : msgs) {
+  const kept = cut >= 0 ? msgs.slice(cut + 1) : msgs
+  const lastAssistant = kept.findLastIndex((m) => m.role === 'assistant')
+  for (const [i, m] of kept.entries()) {
+    const latest = i >= lastAssistant
+    const old = compact > 0 && (!latest || compact >= 3)
+    const maxOut = latest ? 6000 : compact >= 2 ? 600 : 1500
     if (m.role === 'user') {
       const files = (m.attachments ?? []).filter((a) => a.kind === 'file')
       const parts = files.map((f) => `Fichier joint « ${f.name} » :\n\`\`\`${langFromFilename(f.name)}\n${f.text ?? ''}\n\`\`\``)
@@ -168,16 +233,19 @@ function buildMessages(msgs: Message[], system: string, vision: boolean, summary
       out.push({
         role: 'assistant',
         content,
-        ...(calls.length ? { tool_calls: calls.map((t) => ({ id: t.id, function: { name: t.name, arguments: t.args } })) } : {}),
+        ...(calls.length
+          ? { tool_calls: calls.map((t) => ({ id: t.id, function: { name: t.name, arguments: old && compact >= 2 ? lightArgs(t.args) : t.args } })) }
+          : {}),
       })
       // Résultat de chaque outil (et la capture d'écran pour les modèles « Vision »)
       for (const t of calls) {
         const image = vision && t.image ? [t.image.split(',')[1]] : undefined
+        const output = t.output ?? (t.status === 'denied' ? "Refusé par l'utilisateur." : '')
         out.push({
           role: 'tool',
           tool_name: t.name,
           tool_call_id: t.id,
-          content: t.output ?? (t.status === 'denied' ? "Refusé par l'utilisateur." : ''),
+          content: old ? clip(output, maxOut) : output,
           ...(image ? { images: image } : {}),
         })
       }
@@ -233,14 +301,34 @@ export async function send(text_?: string, opts?: { think?: boolean }) {
   await generate(convId, opts)
 }
 
-export async function regenerate(convId: string, opts?: { think?: boolean; onlyLast?: boolean }) {
+/**
+ * Régénérer / Réessayer / Relancer : par défaut, on REPREND. Le travail déjà fait (étapes d'agent dont des outils ont
+ * abouti : fichiers écrits, programmes compilés, commandes lancées) est gardé, et seule la dernière étape est refaite
+ * (celle qui a échoué ou a été interrompue, ou la réponse finale) : le modèle repart des résultats déjà obtenus.
+ * `restart` : tout recommencer (toute la dernière réponse est retirée) ; `onlyLast` : refaire la dernière étape.
+ */
+export async function regenerate(convId: string, opts?: { think?: boolean; onlyLast?: boolean; restart?: boolean }) {
   const s = useStore.getState()
   const conv = s.conversations[convId]
   if (!conv || s.streaming[convId]) return
-  // Retire toute la dernière réponse, étapes d'agent comprises (ou seulement la dernière étape).
-  for (let i = conv.messages.length - 1; i >= 0 && conv.messages[i].role === 'assistant'; i--) {
-    s.removeMessage(convId, conv.messages[i].id)
-    if (opts?.onlyLast) break
+  const msgs = conv.messages
+  if (opts?.restart) {
+    for (let i = msgs.length - 1; i >= 0 && msgs[i].role === 'assistant'; i--) s.removeMessage(convId, msgs[i].id)
+  } else {
+    const last = msgs[msgs.length - 1]
+    if (last?.role === 'assistant') {
+      // Une étape dont des outils ont vraiment tourné est gardée, même s'ils ont échoué (erreur de compilation, test
+      // raté : c'est un résultat) ; le modèle continue à partir de là. Une étape coupée (génération en erreur ou
+      // interrompue, outils interrompus ou non lancés) ou la réponse finale est refaite.
+      const ran = (t: ToolCall) =>
+        t.status === 'done' || (t.status === 'error' && !/^(Interrompu|Pont de l'agent injoignable|Outil (non activé|inconnu))/.test(t.output ?? ''))
+      const keep = !opts?.onlyLast && !last.error && !last.stopped && !!last.toolCalls?.some(ran)
+      if (!keep) s.removeMessage(convId, last.id)
+      else
+        for (const t of last.toolCalls ?? [])
+          if (t.status === 'pending' || t.status === 'running')
+            s.patchToolCall(convId, last.id, t.id, { status: 'error', needsApproval: false, output: 'Interrompu avant la fin : à refaire si besoin.' })
+    }
   }
   await generate(convId, { think: opts?.think })
 }
@@ -458,6 +546,7 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
   const platform = agent ? bridgeInfo?.platform : undefined
   const agentTools = TOOLS.filter((t) => t.function.name !== 'applescript' || platform === 'darwin')
   const tools = [...(agent ? agentTools : []), ...(lab ? LAB_TOOLS : []), ...(web ? WEB_TOOLS : [])]
+  const numCtx = contextFor(settings.num_ctx, tools.length > 0, info, s.lowMemory)
 
   // Demande d'image : Ollama ne génère pas de photo, le modèle dessine en SVG (affiché comme une image dans le fil)
   if (lastUser && detectTask(lastUser.content, !!lastUser.attachments?.some((a) => a.kind === 'image')) === 'image')
@@ -483,12 +572,15 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
     const lastUserIdx = conv.messages.length - 1 // le message de l'utilisateur qu'on traite
     const start = summary ? conv.messages.findIndex((m) => m.id === summary!.uptoId) + 1 : 0
     const older = conv.messages.slice(Math.max(0, start), lastUserIdx)
-    const tooLong = estimateTokens(conv.messages.slice(Math.max(0, start)), summary?.text) > settings.num_ctx * 0.7
+    // Consignes et définitions d'outils comptent aussi : avec l'agent, elles prennent à elles seules une bonne part de la mémoire.
+    const fixed = tokensOf(system) + (tools.length ? tokensOf(JSON.stringify(tools)) : 0)
+    const tooLong = fixed + estimateTokens(conv.messages.slice(Math.max(0, start)), summary?.text) > numCtx * 0.7
     const wantSummary = older.length >= 2 && ((handoff && s.handoffMode === 'summary') || tooLong)
     if (wantSummary) {
       patch({ phase: 'summarizing' })
       try {
-        const text = await summarize(older, summary?.text, model, info, settings.num_ctx, signal)
+        // Même mémoire que la réponse qui suit : sinon Ollama recharge le modèle deux fois
+        const text = await summarize(older, summary?.text, model, info, numCtx, signal)
         if (text) {
           summary = { text, uptoId: older[older.length - 1].id, model, count: (summary?.count ?? 0) + older.length }
           useStore.getState().updateConversation(convId, { summary })
@@ -516,7 +608,12 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
     }
   }
 
-  const history = buildMessages(conv.messages, system, vision, summary)
+  // Avant chaque requête (étapes de l'agent comprises) : si l'historique ne laisse pas assez de place pour la réponse,
+  // les étapes passées sont allégées. Sans cela, un long fichier écrit par un outil est coupé net au bout de la mémoire.
+  let level = 0
+  let history = buildMessages(conv.messages, system, vision, summary)
+  while (level < 3 && estimateRequest(history, tools) > numCtx * (1 - ANSWER_RESERVE))
+    history = buildMessages(conv.messages, system, vision, summary, ++level)
   const native: ApiToolCall[] = []
   let content = ''
   let thinking = ''
@@ -531,16 +628,16 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
   const thinkingSeconds = () =>
     thinkStart === null ? undefined : ((thinkEnd ?? performance.now()) - thinkStart) / 1000
 
-  try {
-    await ollama.chat(
+  const request = (messages: ApiMessage[]) =>
+    ollama.chat(
       {
         model,
-        messages: history,
+        messages,
         options: {
           temperature: settings.temperature,
           top_p: settings.top_p,
           repeat_penalty: settings.repeat_penalty,
-          num_ctx: settings.num_ctx,
+          num_ctx: numCtx,
         },
         ...(supportsThinking(info) ? { think } : {}),
         ...(settings.keepLoaded ? { keep_alive: -1 } : {}),
@@ -566,12 +663,30 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
             tps: evalCount && c.eval_duration ? evalCount / (c.eval_duration / 1e9) : 0,
             seconds: (c.total_duration ?? 0) / 1e9,
             loadSeconds: (c.load_duration ?? 0) / 1e9,
+            ctx: numCtx,
           }
         }
         if (!raf) raf = requestAnimationFrame(flushNow)
       },
       signal,
     )
+
+  try {
+    for (;;) {
+      try {
+        await request(history)
+        break
+      } catch (e) {
+        // Mémoire pleine malgré l'estimation : une nouvelle tentative, l'historique allégé au maximum.
+        if (!isContextFull(e) || level >= 3 || signal.aborted) throw e
+        history = buildMessages(conv.messages, system, vision, summary, (level = 3))
+        content = ''
+        thinking = ''
+        native.length = 0
+        thinkStart = thinkEnd = null
+        patch({ content: '', thinking: undefined })
+      }
+    }
     cancelAnimationFrame(raf)
 
     // Appels d'outils natifs, sinon écrits en JSON dans le texte par les modèles qui ne les gèrent pas nativement.
@@ -608,7 +723,14 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
       thinking: thinking || undefined,
       thinkingSeconds: thinkingSeconds(),
       streaming: false,
-      ...(aborted ? { stopped: true } : { error: (e as Error).message }),
+      ...(aborted
+        ? { stopped: true }
+        : {
+            error: isContextFull(e)
+              ? `Mémoire du modèle pleine (${formatCtx(numCtx)} jetons), même après avoir allégé l'historique. ` +
+                'Agrandissez sa mémoire (Modèles → réglages du modèle → Mémoire « Longue »), demandez un fichier plus court ou continuez dans une nouvelle conversation.'
+              : (e as Error).message,
+          }),
     })
     return { msgId: assistant.id, calls: [] }
   }

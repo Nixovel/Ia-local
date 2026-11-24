@@ -1,13 +1,13 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
-// Labos isolés (Linux, Windows, Android, Windows complet) côté interface : état, actions, écran en direct,
+// Labos isolés (Linux, Android, Windows complet) côté interface : état, actions, écran en direct,
 // via le pont local (agent/lab.ts, agent/winvm.ts).
 import { agentInfo, resetAgentInfo } from './agent'
 
-export type DockerLabId = 'linux' | 'windows' | 'android'
+export type DockerLabId = 'linux' | 'android'
 export type LabId = DockerLabId | 'windows-vm'
 /** Labos en conteneur Docker (la machine virtuelle Windows a sa propre ligne dans les réglages). */
-export const LAB_IDS: DockerLabId[] = ['linux', 'windows', 'android']
-export const LAB_LABELS: Record<LabId, string> = { 'windows-vm': 'Windows (VM)', linux: 'Linux', windows: 'Windows (Wine)', android: 'Android' }
+export const LAB_IDS: DockerLabId[] = ['linux', 'android']
+export const LAB_LABELS: Record<LabId, string> = { 'windows-vm': 'Windows (VM)', linux: 'Linux', android: 'Android' }
 
 /** Machine virtuelle Windows 11 ARM (labo « windows-vm »). */
 export type VmStatus = {

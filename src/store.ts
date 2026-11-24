@@ -21,7 +21,8 @@ export type Attachment = {
   height?: number
 }
 
-export type Stats = { evalCount: number; promptCount: number; tps: number; seconds: number; loadSeconds?: number }
+/** ctx : mémoire (contexte) réellement utilisée pour cette réponse, parfois plus grande que le réglage (outils). */
+export type Stats = { evalCount: number; promptCount: number; tps: number; seconds: number; loadSeconds?: number; ctx?: number }
 
 export type ToolCall = {
   id: string
