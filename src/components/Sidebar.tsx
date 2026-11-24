@@ -1,14 +1,35 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Command, Cpu, Folder, PanelLeft, Pencil, Plus, Search, Settings, Trash, X } from 'lucide-react'
+import { Box, Command, Cpu, Folder, LoaderCircle, PanelLeft, Pencil, Plus, Search, Settings, Shield, ShieldCheck, Trash, X } from 'lucide-react'
 import { useStore, type Conversation } from '../store'
 import { dayGroup, formatBytes, fr } from '../lib/format'
 import { prettyName } from '../lib/models'
 import { conversationFiles } from '../lib/codeblocks'
 import { IconButton, Kbd, Logo, Meter, StackMeter, StatusDot, Tag, useArmed } from './ui'
 import { GiB, useLiveUsage } from '../lib/hardware'
+import { flag, useVpn } from '../lib/vpn'
 
 const GROUP_ORDER = ["Aujourd'hui", 'Hier', '7 derniers jours', '30 derniers jours', 'Plus ancien']
+
+/** Entrée « VPN » : bouclier vert et pays vu par les sites quand le VPN tourne (lancé ici, par l'agent ou ailleurs). */
+function VpnItem({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const vpn = useVpn()
+  const code = vpn?.connected ? (vpn.place?.country || vpn.country || '') : ''
+  return (
+    <button type="button" className={`sb-item${active ? ' is-active' : ''}`} onClick={onClick} title={vpn?.connected ? `VPN actif : ${vpn.place?.countryName ?? vpn.countryName ?? ''}` : 'VPN arrêté'}>
+      {vpn?.connected ? <ShieldCheck size={16} strokeWidth={1.6} className="vpn-on" /> : <Shield size={16} strokeWidth={1.6} />}
+      <span>VPN</span>
+      <span className="spacer" />
+      {vpn?.busy ? (
+        <LoaderCircle size={13} strokeWidth={1.8} className="muted" />
+      ) : vpn?.connected ? (
+        <span className="sb-vpn-on">
+          {flag(code)} {code.toUpperCase() || 'ON'}
+        </span>
+      ) : null}
+    </button>
+  )
+}
 
 export function Sidebar() {
   const webSearch = useStore((s) => s.webSearch)
@@ -118,6 +139,7 @@ export function Sidebar() {
           <span className="spacer" />
           <span className="mono-sm muted">{models.length || ''}</span>
         </button>
+        <VpnItem active={view === 'vpn'} onClick={() => setView('vpn')} />
       </nav>
 
       <div className="sb-list">

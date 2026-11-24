@@ -97,7 +97,7 @@ export const thinkModeOf = (v: unknown): ThinkMode =>
   v === 'on' || v === 'off' || v === 'auto' ? v : v === false ? 'off' : 'auto'
 
 export type Panel = { type: 'code'; key: string } | { type: 'image'; id: string } | null
-export type View = 'chat' | 'models' | 'library'
+export type View = 'chat' | 'models' | 'library' | 'vpn'
 export type ToastItem = { id: string; text: string; tone: 'neutral' | 'success' | 'danger' }
 export type PullState = { status: string; completed?: number; total?: number; error?: string }
 

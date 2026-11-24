@@ -6,6 +6,7 @@ export type ToolName =
   | 'set_working_dir' | 'run_command' | 'read_file' | 'write_file' | 'list_dir' | 'open' | 'screenshot' | 'applescript'
   | 'system_info' | 'install_model' | 'web_search' | 'web_fetch' | 'weather'
   | 'lab_run' | 'lab_write_file' | 'lab_read_file' | 'lab_screenshot' | 'lab_copy_in' | 'android_adb' | 'build_exe'
+  | 'vpn'
 export type ToolResult = { ok: boolean; output: string; image?: string; cwd?: string }
 export type AgentInfo = { token: string; home: string; platform: string; arch?: string; shell: string }
 
@@ -44,6 +45,10 @@ export const TOOLS: OllamaTool[] = [
   fn('install_model', 'Télécharge et installe un modèle Ollama (ex. « qwen2.5-coder:14b »). Vérifie d’abord avec system_info qu’il est adapté à la machine.', {
     name: { type: 'string', description: 'Nom du modèle dans la bibliothèque Ollama' },
   }, ['name']),
+  fn('vpn', "Lumen VPN : change la localisation apparente de l'ordinateur (les sites et les navigateurs voient le pays choisi), ou la remet. Actions : « connect » (lancer, ou changer de pays s'il tourne déjà), « disconnect » (arrêter), « new_ip » (nouvelle adresse dans le même pays), « status » (état et pays vu par les sites), « countries » (pays possibles).", {
+    action: { type: 'string', description: 'Ce qu’il faut faire', enum: ['connect', 'disconnect', 'new_ip', 'status', 'countries'] },
+    country: { type: 'string', description: 'Pour « connect » : le pays, en code ISO à 2 lettres (« de », « fr », « us », « ch », « nl »…) ou en toutes lettres (« Allemagne ») ; vide = le plus rapide' },
+  }, ['action']),
 ]
 
 /** Accès Internet (option « Recherche Internet ») : disponibles aussi hors mode agent, sans validation (lecture seule). */
@@ -171,6 +176,8 @@ const resolvePath = (p: string, cwd: string, home: string) => {
 /** La lecture dans le dossier de travail passe sans demander ; tout le reste demande une validation. */
 export function needsApproval(name: string, args: Record<string, unknown>, cwd: string, home: string, allowed: string[]): boolean {
   if (allowed.includes(name) || NO_APPROVAL.has(name)) return false
+  // VPN : seul le lancement (ou le changement de pays) modifie les réglages réseau du Mac. Arrêter remet tout comme avant.
+  if (name === 'vpn') return args.action === 'connect'
   if (!READ_ONLY.has(name)) return true
   const target = resolvePath(String(args.path ?? '.'), cwd, home)
   const root = resolvePath(cwd, cwd, home)
@@ -203,6 +210,7 @@ export function agentSystemPrompt(info: AgentInfo, cwd: string): string {
     '- write_file crée automatiquement les dossiers manquants : écris chaque fichier complet (pas de « … »).',
     "- Pour conseiller ou installer un modèle d'IA, appelle d'abord system_info, propose un modèle « Fluide », puis install_model si l'utilisateur est d'accord. (Commande manuelle équivalente : « ollama pull <nom> ».)",
     '- Une étape à la fois : lis le résultat de chaque outil avant la suivante. Si un outil échoue, corrige et réessaie.',
+    "- VPN : si l'utilisateur veut changer de pays ou de localisation, masquer son adresse, ou lancer / arrêter le VPN, appelle vpn (connect avec le pays, disconnect, new_ip, status). Ne le lance jamais sans qu'on te le demande.",
     "- L'utilisateur valide les actions sensibles : s'il refuse, ne recommence pas, propose autre chose.",
     '- Avant une action destructive (suppression, écrasement), explique ce que tu vas faire.',
     '- Quand la tâche est terminée, résume en quelques lignes ce que tu as fait. Réponds en français.',

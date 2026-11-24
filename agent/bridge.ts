@@ -21,6 +21,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isLab, LAB_TOOL_NAMES, labAction, labInput, labScreen, labStatus, labTool, parseScreenInput } from './lab'
 import { buildExe } from './exe'
+import { vpnRoute, vpnTool } from './vpn'
 
 const TOKEN = randomBytes(24).toString('hex')
 const MAX_OUT = 20_000
@@ -291,6 +292,7 @@ async function runTool(name: string, a: Record<string, unknown>, cwd: string): P
     default:
       // Compilateur .exe (agent/exe.ts) et labos isolés (agent/lab.ts)
       if (name === 'build_exe') return buildExe(a)
+      if (name === 'vpn') return vpnTool(a) // Lumen VPN (agent/vpn.ts → vpn/vpn.ts)
       if (LAB_TOOL_NAMES.has(name)) return labTool(name, a, cwd)
       return { ok: false, output: `Outil inconnu : ${name}` }
   }
@@ -643,6 +645,11 @@ const handler: Connect.NextHandleFunction = async (req, res, next) => {
         return send(res, 409, { ok: false, output: (e as Error).message }) // labo éteint, etc.
       }
       return send(res, 200, { ok: true })
+    }
+    // Page « VPN » de l'interface (agent/vpn.ts)
+    if (req.url === '/agent/vpn' || req.url?.startsWith('/agent/vpn/') || req.url?.startsWith('/agent/vpn?')) {
+      if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })
+      return vpnRoute(req, res, send, readBody)
     }
     if (req.url === '/agent/system' && req.method === 'GET') {
       if (req.headers['x-lumen-token'] !== TOKEN) return send(res, 401, { ok: false, output: 'Jeton invalide' })

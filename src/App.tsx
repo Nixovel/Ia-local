@@ -8,6 +8,7 @@ import { Onboarding } from './components/Onboarding'
 import { ChatView } from './views/ChatView'
 import { ModelsView } from './views/ModelsView'
 import { LibraryView } from './views/LibraryView'
+import { VpnView } from './views/VpnView'
 import { Logo } from './components/ui'
 import { fetchHardware, isLowMemory } from './lib/hardware'
 
@@ -71,7 +72,7 @@ export default function App() {
   return (
     <div className="app">
       {sidebarOpen && <Sidebar />}
-      <main className="main">{view === 'models' ? <ModelsView /> : view === 'library' ? <LibraryView /> : <ChatView />}</main>
+      <main className="main">{view === 'models' ? <ModelsView /> : view === 'library' ? <LibraryView /> : view === 'vpn' ? <VpnView /> : <ChatView />}</main>
       <Toasts />
       {settingsOpen && <SettingsDialog />}
       {showOnboarding && !settingsOpen && <Onboarding />}

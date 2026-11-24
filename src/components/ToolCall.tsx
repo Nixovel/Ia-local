@@ -30,6 +30,14 @@ const META: Record<string, { label: string; icon: LucideIcon; detail: (a: Record
   lab_screenshot: { label: 'Labo · écran', icon: Camera, detail: (a) => (a.lab === 'android' ? 'téléphone virtuel' : a.lab === 'windows-vm' ? 'écran de Windows (VM)' : `écran virtuel ${labName(a)}`) },
   lab_copy_in: { label: 'Copier dans le labo', icon: FolderInput, detail: (a) => `${String(a.source ?? '')} → ${labName(a)}` },
   android_adb: { label: 'Téléphone virtuel', icon: Smartphone, detail: (a) => `adb ${String(a.args ?? a.command ?? '')}` },
+  vpn: {
+    label: 'VPN',
+    icon: ShieldCheck,
+    detail: (a) =>
+      a.action === 'connect'
+        ? `lancer · ${String(a.country || '') || 'pays le plus rapide'}`
+        : ({ disconnect: 'arrêter', new_ip: 'nouvelle adresse IP', status: 'état', countries: 'pays disponibles' } as Record<string, string>)[String(a.action)] ?? String(a.action ?? ''),
+  },
   build_exe: {
     label: 'Compiler un .exe',
     icon: Package,

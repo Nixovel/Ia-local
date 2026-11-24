@@ -14,6 +14,10 @@ const WEB =
 const LAB =
   /(?:^|[^\p{L}])(?:labos?|laboratoire|bac\s+à\s+sable|sandbox|machine\s+virtuelle|[ée]mulateur|t[ée]l[ée]phone\s+virtuel|compile[rsz]?|compilation|d[ée]bogue[rsz]?|teste[rsz]?\s+(?:ce|cette|mon|ma|mes|le|la|les|un|une|l['’])\s*(?:code|programme|script|appli\w*|logiciel|projet|site|jeu|fonction|exe|apk|outil|bot)|ex[ée]cute[rsz]?\s+(?:ce|cette|mon|ma|le|la|un|une)\s+(?:code|programme|script|fichier|fonction)|(?:sous|sur|dans|pour)\s+(?:un\s+)?(?:linux|windows|ubuntu|android)|appli(?:cation)?\s+android|\S+\.(?:exe|apk|msi)|apk)(?=$|[^\p{L}])/iu
 
-export const wantsAction = (text: string) => ACTION.test(text)
+// VPN : « lance / arrête le VPN », « change de pays », « mets-moi en Allemagne », « nouvelle adresse IP »…
+const VPN =
+  /(?:^|[^\p{L}])(?:vpn|(?:change[rsz]?|modifie[rsz]?)\s+(?:de\s+|ma\s+|mon\s+|l['’]\s*)?(?:pays|localisation|position|adresse\s+ip|ip)|nouvelle\s+(?:adresse\s+)?ip|(?:mets?|passe[rsz]?|place[rsz]?)[- ]moi\s+(?:en|au|aux)\s+(?!forme|place|courant|relief|avant|attente|ordre|t[êe]te|plus)\p{L}{3,}|masque[rsz]?\s+(?:mon|ma)\s+(?:adresse|ip|position|localisation))(?=$|[^\p{L}])/iu
+
+export const wantsAction = (text: string) => ACTION.test(text) || VPN.test(text)
 export const wantsWeb = (text: string) => WEB.test(text)
 export const wantsLab = (text: string) => LAB.test(text)
