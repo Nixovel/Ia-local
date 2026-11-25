@@ -1,6 +1,6 @@
 // Lumen — © 2026 Nixovel. Tous droits réservés. Licence : voir LICENSE (https://github.com/Nixovel/Ia-local)
 import { thinkModeOf, toast, useStore, type Attachment, type Conversation, type Message, type Stats, type ToolCall } from './store'
-import { ollama, type ApiMessage, type ApiToolCall, type ModelInfo } from './lib/ollama'
+import { draftOptions, ollama, type ApiMessage, type ApiToolCall, type ModelInfo } from './lib/ollama'
 import { formatCtx, isChatModel, prettyName, supportsThinking, supportsTools, supportsVision } from './lib/models'
 import {
   agentInfo, agentSystemPrompt, callTool, CLIENT_TOOLS, LAB_TOOL_NAMES, LAB_TOOLS, labSystemPrompt, needsApproval, parseTextToolCalls, TOOL_NAMES, TOOLS, WEB_TOOL_NAMES, WEB_TOOLS, webSystemPrompt,
@@ -189,7 +189,8 @@ async function summarize(
             `Liste à puces, 250 mots maximum.\n\n---\n${transcript}`,
         },
       ],
-      options: { temperature: 0.2, num_ctx: numCtx },
+      // Mêmes options de décodage spéculatif que la réponse : sinon Ollama recharge le modèle
+      options: { temperature: 0.2, num_ctx: numCtx, ...(await draftOptions(model)) },
       ...(supportsThinking(info) ? { think: false } : {}),
     },
     (c) => {
@@ -628,6 +629,8 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
   const thinkingSeconds = () =>
     thinkStart === null ? undefined : ((thinkEnd ?? performance.now()) - thinkStart) / 1000
 
+  // Tête MTP du modèle, s'il en a une (Qwen3.8 par exemple) : génération environ 2 fois plus rapide
+  const draft = await draftOptions(model)
   const request = (messages: ApiMessage[]) =>
     ollama.chat(
       {
@@ -638,6 +641,7 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
           top_p: settings.top_p,
           repeat_penalty: settings.repeat_penalty,
           num_ctx: numCtx,
+          ...draft,
         },
         ...(supportsThinking(info) ? { think } : {}),
         ...(settings.keepLoaded ? { keep_alive: -1 } : {}),
