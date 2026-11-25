@@ -185,25 +185,32 @@ export function needsApproval(name: string, args: Record<string, unknown>, cwd: 
 }
 
 // ---------- Prompt système ----------
-/**
- * Date et heure arrondie à l'heure : les consignes ne changent qu'une fois par heure. Ollama réutilise ainsi
- * la conversation déjà lue (cache) au lieu de tout relire à chaque minute, et la réponse démarre plus vite.
- */
+/** Date et heure arrondie à l'heure : le repère ne change qu'une fois par heure, même pendant les étapes d'une réponse. */
 function nowRounded(): string {
   const d = new Date()
   return `${d.toLocaleDateString('fr-FR', { dateStyle: 'full' })}, entre ${d.getHours()} h et ${(d.getHours() + 1) % 24} h`
 }
 
-export function agentSystemPrompt(info: AgentInfo, cwd: string): string {
+/**
+ * Repères qui changent (date, dossier de travail), envoyés au début du dernier message de l'utilisateur plutôt que
+ * dans les consignes : consignes et outils restent ainsi identiques d'une heure et d'un dossier à l'autre, et Ollama
+ * réutilise leur lecture. Dans les consignes, un changement d'heure ou un set_working_dir faisait tout relire
+ * (≈ 35 s en mode Agent sur Qwen3.8 27B, Mac M5).
+ */
+export function turnContext(cwd?: string): string {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return `[Repères : nous sommes le ${nowRounded()} (fuseau ${tz})${cwd ? ` ; dossier de travail : ${cwd}` : ''}.]`
+}
+
+export function agentSystemPrompt(info: AgentInfo): string {
   const os = info.platform === 'darwin' ? 'macOS' : info.platform === 'win32' ? 'Windows' : info.platform === 'linux' ? 'Linux' : info.platform
   const shell =
     info.platform === 'win32'
       ? 'Les commandes de run_command passent par PowerShell (syntaxe PowerShell, chemins Windows).'
       : `Les commandes de run_command passent par ${info.shell.split('/').pop() || 'le shell'}.`
-  const date = nowRounded()
   return [
     `Tu es Lumen, un agent qui travaille directement sur l'ordinateur de l'utilisateur (${os}) grâce à des outils.`,
-    `Dossier de travail : ${cwd}. Dossier personnel : ${info.home}. Date : ${date}. ${shell}`,
+    `Dossier personnel : ${info.home}. Le dossier de travail et la date sont rappelés au début du dernier message (« Repères »). ${shell}`,
     "Règles :",
     "- Agis avec les outils au lieu de dire à l'utilisateur quoi faire (lister, lire, écrire, lancer des commandes, ouvrir des apps).",
     "- Si l'utilisateur te demande de travailler dans un dossier, appelle d'abord set_working_dir. Les chemins relatifs partent du dossier de travail.",
@@ -217,12 +224,10 @@ export function agentSystemPrompt(info: AgentInfo, cwd: string): string {
   ].join('\n')
 }
 
-/** Consignes quand la recherche Internet est activée (date et ville pour la météo et l'actualité). */
+/** Consignes quand la recherche Internet est activée (ville pour la météo ; la date arrive avec le dernier message, voir turnContext). */
 export function webSystemPrompt(city: string): string {
-  const date = nowRounded()
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   return [
-    `Tu as accès à Internet grâce à des outils. Nous sommes le ${date} (fuseau ${tz}).${city ? ` L'utilisateur habite à ${city}.` : ''}`,
+    `Tu as accès à Internet grâce à des outils. La date du jour est rappelée au début du dernier message (« Repères »).${city ? ` L'utilisateur habite à ${city}.` : ''}`,
     "- Météo : appelle weather (sans ville, celle de l'utilisateur ; si elle est inconnue, demande-la).",
     "- Actualité, faits récents, prix, horaires, ou toute information dont tu n'es pas sûr : appelle web_search, puis web_fetch pour lire une page si les extraits ne suffisent pas.",
     '- Réponds à partir des résultats, sans rien inventer, et cite tes sources en liens Markdown [titre](url).',

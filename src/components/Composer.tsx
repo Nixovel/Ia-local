@@ -4,7 +4,7 @@ import { ArrowUp, AudioLines, Bot, Brain, ChevronDown, FileCode, FlaskConical, F
 import { agentInfo } from '../lib/agent'
 import { detectTask, strengthInfo, suggestModel } from '../lib/strengths'
 import { thinkModeOf, useStore, type ThinkMode } from '../store'
-import { addFiles, addScreenCapture, send, shouldThink, stop } from '../chat'
+import { addFiles, addScreenCapture, prewarm, send, shouldThink, stop } from '../chat'
 import { wantsAction, wantsLab, wantsWeb } from '../lib/intent'
 import { startConversation } from '../voice/conversation'
 import { prettyName, supportsThinking, supportsTools, supportsVision } from '../lib/models'
@@ -90,6 +90,13 @@ export function Composer({ placeholder, autoFocus }: { placeholder: string; auto
   const showAgentHint = !autoTools && intent.action && !agentMode && tools && !streaming && !agentHintOff
 
   useLayoutEffect(() => autosize(taRef.current), [draft.text])
+
+  // Préchauffage : pendant la saisie, le modèle charge et lit déjà consignes, outils et historique (voir prewarm)
+  useEffect(() => {
+    if (!draft.text.trim() || streaming) return
+    const id = setTimeout(() => void prewarm(draft.text), 700)
+    return () => clearTimeout(id)
+  }, [draft.text, streaming, selected, agentMode, webSearch, labMode])
 
   // Recalcule la hauteur si la largeur change (polices chargées, panneau ouvert, fenêtre redimensionnée).
   useEffect(() => {

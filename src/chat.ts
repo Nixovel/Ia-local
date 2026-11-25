@@ -3,7 +3,7 @@ import { thinkModeOf, toast, useStore, type Attachment, type Conversation, type 
 import { draftOptions, ollama, type ApiMessage, type ApiToolCall, type ModelInfo } from './lib/ollama'
 import { formatCtx, isChatModel, prettyName, supportsThinking, supportsTools, supportsVision } from './lib/models'
 import {
-  agentInfo, agentSystemPrompt, callTool, CLIENT_TOOLS, LAB_TOOL_NAMES, LAB_TOOLS, labSystemPrompt, needsApproval, parseTextToolCalls, TOOL_NAMES, TOOLS, WEB_TOOL_NAMES, WEB_TOOLS, webSystemPrompt,
+  agentInfo, agentSystemPrompt, callTool, CLIENT_TOOLS, LAB_TOOL_NAMES, LAB_TOOLS, labSystemPrompt, needsApproval, parseTextToolCalls, TOOL_NAMES, TOOLS, turnContext, WEB_TOOL_NAMES, WEB_TOOLS, webSystemPrompt,
   type ToolResult,
 } from './lib/agent'
 import { weather, webFetch, webSearch } from './lib/web'
@@ -205,8 +205,9 @@ async function summarize(
  * `compact` allège l'historique quand la mémoire du modèle déborde :
  * 1 = longues sorties d'outils des étapes passées raccourcies ; 2 = en plus, contenus déjà écrits par les outils réduits
  * à leur début ; 3 = en dernier recours, la dernière étape aussi (sortie gardée plus longue : le modèle en a besoin).
+ * `context` (date, dossier de travail : voir turnContext) est placé au début du dernier message de l'utilisateur.
  */
-function buildMessages(msgs: Message[], system: string, vision: boolean, summary?: Conversation['summary'], compact = 0): ApiMessage[] {
+function buildMessages(msgs: Message[], system: string, vision: boolean, summary?: Conversation['summary'], compact = 0, context = ''): ApiMessage[] {
   const out: ApiMessage[] = []
   // Avec un résumé, les messages qu'il couvre sont remplacés par lui.
   const cut = summary ? msgs.findIndex((m) => m.id === summary.uptoId) : -1
@@ -214,6 +215,7 @@ function buildMessages(msgs: Message[], system: string, vision: boolean, summary
   if (sys) out.push({ role: 'system', content: sys })
   const kept = cut >= 0 ? msgs.slice(cut + 1) : msgs
   const lastAssistant = kept.findLastIndex((m) => m.role === 'assistant')
+  const lastUser = kept.findLastIndex((m) => m.role === 'user')
   for (const [i, m] of kept.entries()) {
     const latest = i >= lastAssistant
     const old = compact > 0 && (!latest || compact >= 3)
@@ -221,6 +223,7 @@ function buildMessages(msgs: Message[], system: string, vision: boolean, summary
     if (m.role === 'user') {
       const files = (m.attachments ?? []).filter((a) => a.kind === 'file')
       const parts = files.map((f) => `Fichier joint « ${f.name} » :\n\`\`\`${langFromFilename(f.name)}\n${f.text ?? ''}\n\`\`\``)
+      if (context && i === lastUser) parts.unshift(context)
       if (m.content) parts.push(m.content)
       const images = vision
         ? (m.attachments ?? []).filter((a) => a.kind === 'image' && a.dataUrl).map((a) => a.dataUrl!.split(',')[1])
@@ -508,6 +511,113 @@ const IMAGE_PROMPT = [
   "Ne dis pas que tu ne peux pas créer d'image : dessine-la.",
 ].join('\n')
 
+type Modes = { agent: boolean; web: boolean; lab: boolean }
+
+/**
+ * Consignes système, outils, contexte et repères (date, dossier) d'une requête. La réponse et le préchauffage passent
+ * tous deux par ici : le préchauffage ne sert que s'il envoie exactement le même début de prompt.
+ */
+async function promptSetup(
+  model: string,
+  info: ModelInfo | undefined,
+  want: Modes,
+  conv: Conversation | undefined,
+  ask: { content: string; images: boolean } | undefined,
+  onAgentError?: (e: Error) => void,
+) {
+  const s = useStore.getState()
+  const settings = s.settingsFor(model)
+  // Mode agent : outils + consignes système décrivant l'ordinateur ; Recherche Internet : outils web (option)
+  let agent = want.agent && supportsTools(info)
+  const web = want.web && supportsTools(info)
+  let system = settings.system
+  let cwd: string | undefined
+  if (agent) {
+    try {
+      const ai = await agentInfo()
+      const extra = settings.system.trim() ? `\n\nConsignes de l'utilisateur :\n${settings.system.trim()}` : ''
+      system = agentSystemPrompt(ai) + extra
+      cwd = conv?.cwd || s.agentCwd || ai.home
+    } catch (e) {
+      agent = false
+      onAgentError?.(e as Error)
+    }
+  }
+
+  if (web) system = [system.trim(), webSystemPrompt(s.userCity)].filter(Boolean).join('\n\n')
+  // Labos isolés (Linux, Windows, Android) : l'IA y compile et teste pour de vrai
+  const lab = want.lab && supportsTools(info)
+  const bridgeInfo = agent || lab ? await agentInfo().catch(() => null) : null
+  if (lab) system = [system.trim(), labSystemPrompt(bridgeInfo?.arch)].filter(Boolean).join('\n\n')
+  if (voiceActive()) system = [system.trim(), VOICE_PROMPT].filter(Boolean).join('\n\n')
+  // AppleScript n'existe que sur macOS : inutile de le proposer au modèle ailleurs
+  const platform = agent ? bridgeInfo?.platform : undefined
+  const agentTools = TOOLS.filter((t) => t.function.name !== 'applescript' || platform === 'darwin')
+  const tools = [...(agent ? agentTools : []), ...(lab ? LAB_TOOLS : []), ...(web ? WEB_TOOLS : [])]
+  const numCtx = contextFor(settings.num_ctx, tools.length > 0, info, s.lowMemory)
+
+  // Demande d'image : Ollama ne génère pas de photo, le modèle dessine en SVG (affiché comme une image dans le fil)
+  if (ask && detectTask(ask.content, ask.images) === 'image')
+    system = [
+      system.trim(),
+      IMAGE_PROMPT,
+      agent ? "Pour dessiner, n'utilise aucun outil : écris le bloc svg dans ta réponse. Seulement si l'utilisateur demande d'enregistrer l'image, écris aussi ce SVG avec write_file." : '',
+    ].filter(Boolean).join('\n\n')
+
+  // Date et dossier de travail : avec le dernier message, pas dans les consignes (voir turnContext)
+  const context = agent || web ? turnContext(cwd) : ''
+  return { system, tools, numCtx, context }
+}
+
+// ---------- Préchauffage ----------
+let warmedKey = '' // dernier préchauffage terminé
+let warmingKey = '' // préchauffage en cours
+
+/**
+ * Préchauffage pendant la saisie : Ollama charge le modèle et lit dès maintenant consignes, outils et historique du mode
+ * qui sera utilisé (celui que l'envoi activera tout seul compris). Le message parti, seule la question reste à lire.
+ * Mesuré sur Qwen3.8 27B (Mac M5) : 1er message en mode Agent 34 s → 0,8 s si la saisie a laissé le temps de tout lire ;
+ * envoyé plus tôt, le préchauffage est interrompu et ce qu'il a déjà lu reste acquis.
+ */
+export async function prewarm(text: string) {
+  const s = useStore.getState()
+  const model = s.selectedModel
+  const info = s.runtime.models.find((m) => m.name === model)
+  const conv = s.activeId ? s.conversations[s.activeId] : undefined
+  if (!model || !info || !text.trim() || (conv && s.streaming[conv.id])) return
+  // Mêmes modes que ceux qu'activera l'envoi (autoEnableTools)
+  const auto = s.autoTools && supportsTools(info)
+  const lab = s.labMode || (auto && wantsLab(text))
+  const want = {
+    agent: s.agentMode || (auto && wantsAction(text) && !wantsLab(text)),
+    web: s.webSearch || (auto && wantsWeb(text)),
+    lab,
+  }
+  const images = s.draft.attachments.some((a) => a.kind === 'image')
+  const setup = await promptSetup(model, info, want, conv, { content: text, images })
+  // Un nouveau message vide à la fin : Ollama garde un point de reprise juste avant lui, là où arrivera la question
+  const messages: ApiMessage[] = [...buildMessages(conv?.messages ?? [], setup.system, supportsVision(info), conv?.summary), { role: 'user', content: '' }]
+  const settings = s.settingsFor(model)
+  const key = JSON.stringify([model, messages, setup.tools.map((t) => t.function.name), setup.numCtx])
+  const loaded = useStore.getState().runtime.running.some((r) => r.name === model)
+  // Déjà en cours, ou déjà lu et le modèle est toujours chargé
+  if (key === warmingKey || (key === warmedKey && loaded)) return
+  warmingKey = key
+  // Même choix de réflexion que l'envoi : sur certains modèles, il change le début du prompt
+  const mode = thinkModeOf(settings.think)
+  const think = mode === 'auto' ? shouldThink({ id: '', role: 'user', content: text, createdAt: 0 }) : mode === 'on'
+  const ok = await ollama.prewarm({
+    model,
+    messages,
+    options: { num_ctx: setup.numCtx },
+    ...(supportsThinking(info) ? { think } : {}),
+    ...(settings.keepLoaded ? { keep_alive: -1 } : {}),
+    ...(setup.tools.length ? { tools: setup.tools } : {}),
+  })
+  if (warmingKey === key) warmingKey = ''
+  if (ok) warmedKey = key // interrompu ou en erreur : sera refait à la prochaine frappe
+}
+
 async function runGeneration(convId: string, signal: AbortSignal, opts?: { think?: boolean }): Promise<{ msgId: string; calls: ToolCall[] }> {
   const s = useStore.getState()
   const model = s.selectedModel
@@ -522,40 +632,12 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
   if (!vision && lastUser?.attachments?.some((a) => a.kind === 'image') && prev?.role === 'user')
     toast("Ce modèle ne lit pas les images : elles ne lui sont pas envoyées.", 'danger')
 
-  // Mode agent : outils + consignes système décrivant l'ordinateur ; Recherche Internet : outils web (option)
-  let agent = s.agentMode && supportsTools(info)
-  const web = s.webSearch && supportsTools(info)
-  let system = settings.system
-  if (agent) {
-    try {
-      const ai = await agentInfo()
-      const extra = settings.system.trim() ? `\n\nConsignes de l'utilisateur :\n${settings.system.trim()}` : ''
-      system = agentSystemPrompt(ai, conv.cwd || s.agentCwd || ai.home) + extra
-    } catch (e) {
-      agent = false
-      toast(`Mode agent indisponible : ${(e as Error).message}`, 'danger')
-    }
-  }
-
-  if (web) system = [system.trim(), webSystemPrompt(s.userCity)].filter(Boolean).join('\n\n')
-  // Labos isolés (Linux, Windows, Android) : l'IA y compile et teste pour de vrai
-  const lab = s.labMode && supportsTools(info)
-  const bridgeInfo = agent || lab ? await agentInfo().catch(() => null) : null
-  if (lab) system = [system.trim(), labSystemPrompt(bridgeInfo?.arch)].filter(Boolean).join('\n\n')
-  if (voiceActive()) system = [system.trim(), VOICE_PROMPT].filter(Boolean).join('\n\n')
-  // AppleScript n'existe que sur macOS : inutile de le proposer au modèle ailleurs
-  const platform = agent ? bridgeInfo?.platform : undefined
-  const agentTools = TOOLS.filter((t) => t.function.name !== 'applescript' || platform === 'darwin')
-  const tools = [...(agent ? agentTools : []), ...(lab ? LAB_TOOLS : []), ...(web ? WEB_TOOLS : [])]
-  const numCtx = contextFor(settings.num_ctx, tools.length > 0, info, s.lowMemory)
-
-  // Demande d'image : Ollama ne génère pas de photo, le modèle dessine en SVG (affiché comme une image dans le fil)
-  if (lastUser && detectTask(lastUser.content, !!lastUser.attachments?.some((a) => a.kind === 'image')) === 'image')
-    system = [
-      system.trim(),
-      IMAGE_PROMPT,
-      agent ? "Pour dessiner, n'utilise aucun outil : écris le bloc svg dans ta réponse. Seulement si l'utilisateur demande d'enregistrer l'image, écris aussi ce SVG avec write_file." : '',
-    ].filter(Boolean).join('\n\n')
+  const ask = lastUser && { content: lastUser.content, images: !!lastUser.attachments?.some((a) => a.kind === 'image') }
+  const setup = await promptSetup(model, info, { agent: s.agentMode, web: s.webSearch, lab: s.labMode }, conv, ask, (e) =>
+    toast(`Mode agent indisponible : ${e.message}`, 'danger'),
+  )
+  const { tools, numCtx, context } = setup
+  let system = setup.system
 
   const isStep = prev?.role === 'assistant'
   const assistant: Message = {
@@ -612,9 +694,9 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
   // Avant chaque requête (étapes de l'agent comprises) : si l'historique ne laisse pas assez de place pour la réponse,
   // les étapes passées sont allégées. Sans cela, un long fichier écrit par un outil est coupé net au bout de la mémoire.
   let level = 0
-  let history = buildMessages(conv.messages, system, vision, summary)
+  let history = buildMessages(conv.messages, system, vision, summary, 0, context)
   while (level < 3 && estimateRequest(history, tools) > numCtx * (1 - ANSWER_RESERVE))
-    history = buildMessages(conv.messages, system, vision, summary, ++level)
+    history = buildMessages(conv.messages, system, vision, summary, ++level, context)
   const native: ApiToolCall[] = []
   let content = ''
   let thinking = ''
@@ -683,7 +765,7 @@ async function runGeneration(convId: string, signal: AbortSignal, opts?: { think
       } catch (e) {
         // Mémoire pleine malgré l'estimation : une nouvelle tentative, l'historique allégé au maximum.
         if (!isContextFull(e) || level >= 3 || signal.aborted) throw e
-        history = buildMessages(conv.messages, system, vision, summary, (level = 3))
+        history = buildMessages(conv.messages, system, vision, summary, (level = 3), context)
         content = ''
         thinking = ''
         native.length = 0
